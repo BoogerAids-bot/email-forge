@@ -344,7 +344,6 @@ export default function EmailBuilderDashboard() {
                   <span>Vertical Padding</span>
                   <span className="text-zinc-500">{paddingVertical[0]}px</span>
                 </div>
-                {/* FIXED: min/max typed properly as raw numbers */}
                 <Slider min={12} max={100} step={1} value={paddingVertical} onValueChange={(val) => setPaddingVertical(val)} />
               </div>
               <div className="space-y-2">
@@ -352,7 +351,6 @@ export default function EmailBuilderDashboard() {
                   <span>Horizontal Padding</span>
                   <span className="text-zinc-500">{paddingHorizontal[0]}px</span>
                 </div>
-                {/* FIXED: min/max typed properly as raw numbers */}
                 <Slider min={12} max={80} step={1} value={paddingHorizontal} onValueChange={(val) => setPaddingHorizontal(val)} />
               </div>
               <div className="space-y-2">
@@ -360,5 +358,186 @@ export default function EmailBuilderDashboard() {
                   <span>Border Radius</span>
                   <span className="text-zinc-500">{borderRadius[0]}px</span>
                 </div>
-                {/* FIXED: min/max typed properly as raw numbers */}
                 <Slider min={0} max={32} step={1} value={borderRadius} onValueChange={(val) => setBorderRadius(val)} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="image" className="space-y-5 mt-4 outline-none">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-zinc-300">Show Banner Image</label>
+                  <Switch checked={hasImage} onCheckedChange={setHasImage} />
+                </div>
+              </div>
+              {hasImage && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300">Image URL</label>
+                    <Input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} className="bg-zinc-900 border-zinc-800 text-xs text-white" />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
+                      <span>Image Height</span>
+                      <span className="text-zinc-500">{imageHeight[0]}px</span>
+                    </div>
+                    <Slider min={80} max={300} step={5} value={imageHeight} onValueChange={(val) => setImageHeight(val)} />
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
+                      <span>Margin Below Image</span>
+                      <span className="text-zinc-500">{imageMarginBottom[0]}px</span>
+                    </div>
+                    <Slider min={0} max={40} step={1} value={imageMarginBottom} onValueChange={(val) => setImageMarginBottom(val)} />
+                  </div>
+                </>
+              )}
+            </TabsContent>
+
+            <TabsContent value="content" className="space-y-5 mt-4 outline-none">
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300">Title Text</label>
+                <Input type="text" value={titleText} onChange={(e) => setTitleText(e.target.value)} className="bg-zinc-900 border-zinc-800 text-xs text-white" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300">Title Color</label>
+                <div className="flex gap-2">
+                  <Input type="color" value={titleColor} onChange={(e) => setTitleColor(e.target.value)} className="w-12 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
+                  <Input type="text" value={titleColor} onChange={(e) => setTitleColor(e.target.value)} className="flex-1 bg-zinc-900 border-zinc-800 text-xs text-white" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-semibold text-zinc-300">
+                  <span>Title Size</span>
+                  <span className="text-zinc-500">{titleSize[0]}px</span>
+                </div>
+                <Slider min={16} max={48} step={1} value={titleSize} onValueChange={(val) => setTitleSize(val)} />
+              </div>
+              <Separator className="bg-zinc-800 my-4" />
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300">Body Text</label>
+                <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} className="bg-zinc-900 border border-zinc-800 rounded text-xs text-white p-2 w-full h-20 resize-none" />
+              </div>
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-zinc-300">Body Color</label>
+                <div className="flex gap-2">
+                  <Input type="color" value={bodyColor} onChange={(e) => setBodyColor(e.target.value)} className="w-12 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
+                  <Input type="text" value={bodyColor} onChange={(e) => setBodyColor(e.target.value)} className="flex-1 bg-zinc-900 border-zinc-800 text-xs text-white" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs font-semibold text-zinc-300">
+                  <span>Body Text Size</span>
+                  <span className="text-zinc-500">{bodySize[0]}px</span>
+                </div>
+                <Slider min={12} max={24} step={1} value={bodySize} onValueChange={(val) => setBodySize(val)} />
+              </div>
+            </TabsContent>
+
+            <TabsContent value="button" className="space-y-5 mt-4 outline-none">
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-zinc-300">Show Button</label>
+                  <Switch checked={hasButton} onCheckedChange={setHasButton} />
+                </div>
+              </div>
+              {hasButton && (
+                <>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300">Button Text</label>
+                    <Input type="text" value={buttonText} onChange={(e) => setButtonText(e.target.value)} className="bg-zinc-900 border-zinc-800 text-xs text-white" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300">Button Background</label>
+                    <div className="flex gap-2">
+                      <Input type="color" value={buttonBg} onChange={(e) => setButtonBg(e.target.value)} className="w-12 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
+                      <Input type="text" value={buttonBg} onChange={(e) => setButtonBg(e.target.value)} className="flex-1 bg-zinc-900 border-zinc-800 text-xs text-white" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-xs font-semibold text-zinc-300">Button Text Color</label>
+                    <div className="flex gap-2">
+                      <Input type="color" value={buttonTextColor} onChange={(e) => setButtonTextColor(e.target.value)} className="w-12 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
+                      <Input type="text" value={buttonTextColor} onChange={(e) => setButtonTextColor(e.target.value)} className="flex-1 bg-zinc-900 border-zinc-800 text-xs text-white" />
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
+                      <span>Button Border Radius</span>
+                      <span className="text-zinc-500">{buttonRadius[0]}px</span>
+                    </div>
+                    <Slider min={0} max={20} step={1} value={buttonRadius} onValueChange={(val) => setButtonRadius(val)} />
+                  </div>
+                </>
+              )}
+            </TabsContent>
+          </Tabs>
+        </div>
+
+        <div className="p-4 border-t border-zinc-800 shrink-0">
+          <Button onClick={handleCopyToClipboard} className="w-full text-xs h-8 bg-blue-600 hover:bg-blue-500 text-white font-semibold">
+            Export HTML Code
+          </Button>
+        </div>
+      </div>
+
+      {/* LIVE PREVIEW PANE */}
+      <div className="flex-1 bg-zinc-900 p-8 overflow-auto">
+        <div className="mx-auto bg-gray-100 p-4 rounded-lg shadow-lg max-w-2xl">
+          <div style={{
+            backgroundColor: backgroundColor,
+            borderRadius: `${borderRadius[0]}px`,
+            padding: `${paddingVertical[0]}px ${paddingHorizontal[0]}px`,
+          }}>
+            {hasImage && (
+              <div style={{ marginBottom: `${imageMarginBottom[0]}px` }}>
+                <img 
+                  src={imageUrl} 
+                  alt="Banner" 
+                  style={{ 
+                    width: "100%", 
+                    height: `${imageHeight[0]}px`, 
+                    objectFit: "cover",
+                    borderRadius: "4px"
+                  }} 
+                />
+              </div>
+            )}
+            <h1 style={{
+              color: titleColor,
+              fontSize: `${titleSize[0]}px`,
+              fontWeight: 700,
+              margin: "0 0 16px 0",
+              lineHeight: "1.2"
+            }}>
+              {titleText}
+            </h1>
+            <p style={{
+              color: bodyColor,
+              fontSize: `${bodySize[0]}px`,
+              fontWeight: 400,
+              margin: "0 0 24px 0",
+              lineHeight: "1.6",
+              whiteSpace: "pre-wrap"
+            }}>
+              {bodyText}
+            </p>
+            {hasButton && (
+              <button style={{
+                backgroundColor: buttonBg,
+                color: buttonTextColor,
+                padding: "12px 24px",
+                fontSize: "15px",
+                fontWeight: 600,
+                border: "none",
+                borderRadius: `${buttonRadius[0]}px`,
+                cursor: "pointer"
+              }}>
+                {buttonText}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
