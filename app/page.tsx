@@ -26,7 +26,7 @@ export default function EmailBuilderDashboard() {
   const [paddingHorizontal, setPaddingHorizontal] = useState([32]);
   const [borderRadius, setBorderRadius] = useState([8]);
   
-  // NEW: Image Banner State
+  // Image Banner State
   const [hasImage, setHasImage] = useState(false);
   const [imageUrl, setImageUrl] = useState("https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop");
   const [imageHeight, setImageHeight] = useState([180]);
@@ -108,14 +108,14 @@ export default function EmailBuilderDashboard() {
     await supabase.auth.signOut();
   };
 
-  // Push Canvas Parameter Configuration Packet (Including new Image properties)
+  // Push Canvas Parameter Configuration Packet
   const handleSaveTemplate = async () => {
     if (!user) return alert("You must be logged in to sync configs to the cloud.");
     setIsSaving(true);
 
     const currentConfig = {
       backgroundColor, paddingVertical, paddingHorizontal, borderRadius,
-      hasImage, imageUrl, imageHeight, imageMarginBottom, // Dynamic payload additions
+      hasImage, imageUrl, imageHeight, imageMarginBottom,
       titleText, titleColor, titleSize, bodyText, bodyColor, bodySize,
       hasButton, buttonText, buttonBg, buttonTextColor, buttonRadius
     };
@@ -145,7 +145,6 @@ export default function EmailBuilderDashboard() {
     setPaddingHorizontal(cfg.paddingHorizontal || [32]);
     setBorderRadius(cfg.borderRadius || [8]);
     
-    // Safety Fallbacks for the new Image banner configuration structure
     setHasImage(cfg.hasImage !== undefined ? cfg.hasImage : false);
     setImageUrl(cfg.imageUrl || "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop");
     setImageHeight(cfg.imageHeight || [180]);
@@ -184,7 +183,6 @@ export default function EmailBuilderDashboard() {
     }
   };
 
-  // HTML Email Engine Compiler (Upgraded to compile cross-client safe tables for images)
   const generateHTMLCode = () => {
     return `<!DOCTYPE html>
 <html>
@@ -201,7 +199,6 @@ export default function EmailBuilderDashboard() {
           <tr>
             <td style="padding: ${paddingVertical[0]}px ${paddingHorizontal[0]}px ${paddingVertical[0]}px ${paddingHorizontal[0]}px; text-align: left;">
               ${hasImage ? `
-              <!-- Responsive Image Banner Block -->
               <table border="0" cellpadding="0" cellspacing="0" width="100%" style="margin-bottom: ${imageMarginBottom[0]}px;">
                 <tr>
                   <td align="center">
@@ -326,7 +323,6 @@ export default function EmailBuilderDashboard() {
             </div>
           )}
 
-          {/* Expanded 4-Column Navigation Layout Block */}
           <Tabs defaultValue="layout" className="w-full">
             <TabsList className="grid w-full grid-cols-4 bg-zinc-950 p-1 border border-zinc-800 rounded-md">
               <TabsTrigger value="layout" className="text-[11px] rounded-sm py-1.5 data-[state=active]:bg-zinc-800 data-[state=active]:text-white">Layout</TabsTrigger>
@@ -348,225 +344,21 @@ export default function EmailBuilderDashboard() {
                   <span>Vertical Padding</span>
                   <span className="text-zinc-500">{paddingVertical[0]}px</span>
                 </div>
-                <Slider min={[12]} max={[100]} step={1} value={paddingVertical} onValueChange={(val) => setPaddingVertical(val)} />
+                {/* FIXED: min/max typed properly as raw numbers */}
+                <Slider min={12} max={100} step={1} value={paddingVertical} onValueChange={(val) => setPaddingVertical(val)} />
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-semibold text-zinc-300">
                   <span>Horizontal Padding</span>
                   <span className="text-zinc-500">{paddingHorizontal[0]}px</span>
                 </div>
-                <Slider min={[12]} max={[80]} step={1} value={paddingHorizontal} onValueChange={(val) => setPaddingHorizontal(val)} />
+                {/* FIXED: min/max typed properly as raw numbers */}
+                <Slider min={12} max={80} step={1} value={paddingHorizontal} onValueChange={(val) => setPaddingHorizontal(val)} />
               </div>
               <div className="space-y-2">
                 <div className="flex justify-between text-xs font-semibold text-zinc-300">
                   <span>Border Radius</span>
                   <span className="text-zinc-500">{borderRadius[0]}px</span>
                 </div>
-                <Slider min={[0]} max={[32]} step={1} value={borderRadius} onValueChange={(val) => setBorderRadius(val)} />
-              </div>
-            </TabsContent>
-
-            {/* NEW TABS SECTION: BANNER IMAGE MODIFIERS */}
-            <TabsContent value="image" className="space-y-5 mt-4 outline-none">
-              <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-md">
-                <span className="text-xs font-semibold text-zinc-300">Enable Hero Image Banner</span>
-                <Switch checked={hasImage} onCheckedChange={(val) => setHasImage(val)} />
-              </div>
-              
-              {hasImage && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-zinc-300">Image Source URL</label>
-                    <Input type="text" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} className="bg-zinc-950 border-zinc-800 text-xs text-white" placeholder="https://example.com/banner.jpg" />
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
-                      <span>Image Viewport Height</span>
-                      <span className="text-zinc-500">{imageHeight[0]}px</span>
-                    </div>
-                    <Slider min={[60]} max={[350]} step={5} value={imageHeight} onValueChange={(val) => setImageHeight(val)} />
-                  </div>
-
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
-                      <span>Bottom Separation Spacer</span>
-                      <span className="text-zinc-500">{imageMarginBottom[0]}px</span>
-                    </div>
-                    <Slider min={[0]} max={[60]} step={1} value={imageMarginBottom} onValueChange={(val) => setImageMarginBottom(val)} />
-                  </div>
-                </>
-              )}
-            </TabsContent>
-
-            <TabsContent value="content" className="space-y-5 mt-4 outline-none">
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-zinc-300">Heading Text</label>
-                <Input value={titleText} onChange={(e) => setTitleText(e.target.value)} className="bg-zinc-950 border-zinc-800 text-sm text-white" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-zinc-300">Header Color</label>
-                  <div className="flex gap-1.5">
-                    <Input type="color" value={titleColor} onChange={(e) => setTitleColor(e.target.value)} className="w-8 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
-                    <Input type="text" value={titleColor} onChange={(e) => setTitleColor(e.target.value)} className="bg-zinc-950 border-zinc-800 text-xs text-white" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold text-zinc-300">
-                    <span>Font Size</span>
-                    <span className="text-zinc-500">{titleSize[0]}px</span>
-                  </div>
-                  <Slider min={[18]} max={[48]} step={1} value={titleSize} onValueChange={(val) => setTitleSize(val)} className="pt-2" />
-                </div>
-              </div>
-              <Separator className="bg-zinc-800 my-2" />
-              <div className="space-y-2">
-                <label className="text-xs font-semibold text-zinc-300">Body Paragraph Text</label>
-                <textarea value={bodyText} onChange={(e) => setBodyText(e.target.value)} rows={4} className="w-full text-sm rounded-md bg-zinc-950 border border-zinc-800 p-3 resize-none focus:outline-none focus:border-zinc-700 text-zinc-100" />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <label className="text-xs font-semibold text-zinc-300">Text Color</label>
-                  <div className="flex gap-1.5">
-                    <Input type="color" value={bodyColor} onChange={(e) => setBodyColor(e.target.value)} className="w-8 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
-                    <Input type="text" value={bodyColor} onChange={(e) => setBodyColor(e.target.value)} className="bg-zinc-950 border-zinc-800 text-xs text-white" />
-                  </div>
-                </div>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs font-semibold text-zinc-300">
-                    <span>Font Size</span>
-                    <span className="text-zinc-500">{bodySize[0]}px</span>
-                  </div>
-                  <Slider min={[12]} max={[24]} step={1} value={bodySize} onValueChange={(val) => setBodySize(val)} className="pt-2" />
-                </div>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="button" className="space-y-5 mt-4 outline-none">
-              <div className="flex items-center justify-between p-3 bg-zinc-950 border border-zinc-800 rounded-md">
-                <span className="text-xs font-semibold text-zinc-300">Include Action Button</span>
-                <Switch checked={hasButton} onCheckedChange={(val) => setHasButton(val)} />
-              </div>
-              {hasButton && (
-                <>
-                  <div className="space-y-2">
-                    <label className="text-xs font-semibold text-zinc-300">Button Label</label>
-                    <Input value={buttonText} onChange={(e) => setButtonText(e.target.value)} className="bg-zinc-950 border-zinc-800 text-sm text-white" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <label className="text-xs font-semibold text-zinc-300">Button Fill</label>
-                      <div className="flex gap-1.5">
-                        <Input type="color" value={buttonBg} onChange={(e) => setButtonBg(e.target.value)} className="w-8 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
-                        <Input type="text" value={buttonBg} onChange={(e) => setButtonBg(e.target.value)} className="bg-zinc-950 border-zinc-800 text-xs text-white" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-1 space-y-2">
-                      <label className="text-xs font-semibold text-zinc-300">Text Color</label>
-                      <div className="flex gap-1.5">
-                        <Input type="color" value={buttonTextColor} onChange={(e) => setButtonTextColor(e.target.value)} className="w-8 h-9 p-1 bg-zinc-950 border-zinc-800 cursor-pointer" />
-                        <Input type="text" value={buttonTextColor} onChange={(e) => setButtonTextColor(e.target.value)} className="bg-zinc-950 border-zinc-800 text-xs text-white" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-xs font-semibold text-zinc-300">
-                      <span>Button Corner Smoothness</span>
-                      <span className="text-zinc-500">{buttonRadius[0]}px</span>
-                    </div>
-                    <Slider min={[0]} max={[24]} step={1} value={buttonRadius} onValueChange={(val) => setButtonRadius(val)} />
-                  </div>
-                </>
-              )}
-            </TabsContent>
-          </Tabs>
-        </div>
-
-        <div className="p-4 border-t border-zinc-800 bg-zinc-950 flex gap-3 shrink-0">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button variant="outline" className="flex-1 text-xs border-zinc-800 text-zinc-300 hover:bg-zinc-900 bg-transparent">
-                View Generated Code
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl bg-zinc-900 border-zinc-800 text-zinc-50">
-              <DialogHeader>
-                <DialogTitle className="text-lg font-bold text-white">Production Email HTML</DialogTitle>
-                <DialogDescription className="text-xs text-zinc-400">
-                  Copy this clean markup directly into Klaviyo or Mailchimp.
-                </DialogDescription>
-              </DialogHeader>
-              <div className="bg-zinc-950 p-4 rounded-md overflow-x-auto max-h-[380px] overflow-y-auto border border-zinc-800">
-                <pre className="text-xs text-emerald-400 font-mono select-all whitespace-pre-wrap">{generateHTMLCode()}</pre>
-              </div>
-              <div className="flex justify-end pt-2">
-                <Button onClick={handleCopyToClipboard} className="bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-semibold px-4 py-2">
-                  Copy Output Code
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-
-          <Button onClick={handleCopyToClipboard} className="flex-1 bg-white text-zinc-950 hover:bg-zinc-200 text-xs font-semibold">
-            Copy Instant HTML
-          </Button>
-        </div>
-      </div>
-
-      {/* RIGHT SIDE PREVIEW CANVAS */}
-      <div className="flex-1 bg-zinc-950 flex flex-col h-full overflow-hidden">
-        <div className="h-14 border-b border-zinc-800 px-6 flex items-center justify-between shrink-0 bg-zinc-900/40">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs font-medium text-zinc-400">Active Live Responsive Canvas</span>
-          </div>
-        </div>
-        
-        <div className="flex-1 overflow-y-auto p-12 flex items-center justify-center bg-[radial-gradient(#262626_1px,transparent_1px)] [background-size:16px_16px]">
-          <div 
-            style={{ 
-              backgroundColor: backgroundColor, 
-              borderRadius: `${borderRadius[0]}px`,
-              paddingTop: `${paddingVertical[0]}px`,
-              paddingBottom: `${paddingVertical[0]}px`,
-              paddingLeft: `${paddingHorizontal[0]}px`,
-              paddingRight: `${paddingHorizontal[0]}px`,
-              transition: "all 0.1s ease-out"
-            }} 
-            className="w-full max-w-[600px] shadow-2xl overflow-hidden border border-zinc-800/10"
-          >
-            {/* NEW: Canvas Render Module for Image Banner Block */}
-            {hasImage && imageUrl && (
-              <div 
-                style={{ marginBottom: `${imageMarginBottom[0]}px` }} 
-                className="w-full overflow-hidden rounded"
-              >
-                <img 
-                  src={imageUrl} 
-                  alt="Email Hero Visual" 
-                  style={{ height: `${imageHeight[0]}px` }}
-                  className="w-full object-cover select-none pointer-events-none transition-all duration-100"
-                />
-              </div>
-            )}
-
-            <h1 style={{ color: titleColor, fontSize: `${titleSize[0]}px` }} className="font-bold tracking-tight mb-4 leading-tight break-words">
-              {titleText || " "}
-            </h1>
-            <p style={{ color: bodyColor, fontSize: `${bodySize[0]}px` }} className="leading-relaxed mb-6 whitespace-pre-wrap break-words">
-              {bodyText || " "}
-            </p>
-            {hasButton && (
-              <div className="w-full flex">
-                <button style={{ backgroundColor: buttonBg, color: buttonTextColor, borderRadius: `${buttonRadius[0]}px` }} className="px-6 py-3 text-sm font-semibold">
-                  {buttonText || " "}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
+                {/* FIXED: min/max typed properly as raw numbers */}
+                <Slider min={0} max={32} step={1} value={borderRadius} onValueChange={(val) => setBorderRadius(val)} />
