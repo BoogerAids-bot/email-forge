@@ -383,20 +383,17 @@ export default function EmailBuilderDashboard() {
           <Separator style={{ backgroundColor: colors.greyLight }} />
 
           <Tabs defaultValue="layout" className="w-full">
-            <TabsList className="grid grid-cols-4 p-1 border rounded-xl mb-6 transition-all duration-300" style={{ 
-              backgroundColor: colors.offwhite2,
-              borderColor: colors.greyLight
-            }}>
-              <TabsTrigger value="layout" className="rounded-lg p-2 transition-all duration-300 data-[state=active]:shadow-md" style={{ color: colors.grey }}>
+            <TabsList className="grid grid-cols-4 p-1 rounded-xl mb-6">
+              <TabsTrigger value="layout" className="rounded-lg p-2">
                 <Settings2 size={18} />
               </TabsTrigger>
-              <TabsTrigger value="image" className="rounded-lg p-2 transition-all duration-300 data-[state=active]:shadow-md" style={{ color: colors.grey }}>
+              <TabsTrigger value="image" className="rounded-lg p-2">
                 <ImageIcon size={18} />
               </TabsTrigger>
-              <TabsTrigger value="content" className="rounded-lg p-2 transition-all duration-300 data-[state=active]:shadow-md" style={{ color: colors.grey }}>
+              <TabsTrigger value="content" className="rounded-lg p-2">
                 <Type size={18} />
               </TabsTrigger>
-              <TabsTrigger value="button" className="rounded-lg p-2 transition-all duration-300 data-[state=active]:shadow-md" style={{ color: colors.grey }}>
+              <TabsTrigger value="button" className="rounded-lg p-2">
                 <MousePointer2 size={18} />
               </TabsTrigger>
             </TabsList>
@@ -651,8 +648,7 @@ export default function EmailBuilderDashboard() {
                 )}
               </div>
             </div>
-          </div>
-          
+          </div>          
           <div className="mt-8 flex items-center justify-center gap-6 text-[10px] font-bold uppercase tracking-widest animate-in fade-in" style={{ color: colors.grey }}>
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: colors.brown }} />
