@@ -5,12 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { 
-  ImageIcon, 
   Type, 
-  MousePointer2, 
   LogOut, 
   Cloud, 
   History, 
@@ -21,12 +18,32 @@ import {
   Plus,
   ArrowUp,
   ArrowDown,
-  X
+  X,
+  Clock,
+  Image as ImageIcon,
+  Heading1,
+  AlignLeft,
+  MousePointerClick,
+  Minus,
+  Layers as LayersIcon,
+  Monitor,
+  Smartphone
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { User } from "@supabase/supabase-js";
 import { EmailBlock, EmailBlockType } from "@/types/email";
 import { sanitizeBlocks } from "@/lib/sanitization";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+
+// Constants
+const STORAGE_KEY = "emailBuilder_draft";
 
 // Color Palette
 const colors = {
@@ -130,15 +147,104 @@ export default function EmailBuilderDashboard() {
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
   const isIgnoreDirty = React.useRef(true);
+  const [viewportMode, setViewportMode] = useState<'desktop' | 'mobile'>('desktop');
+  
+  // Persistence State
+  const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [recoveredDraft, setRecoveredDraft] = useState<{
+    config: Record<string, unknown>;
+    timestamp: string;
+  } | null>(null);
 
-  // Mark dirty on emailBlocks change
+  // Auto-save to localStorage
+  useEffect(() => {
+    if (isIgnoreDirty.current || !isDirty) return;
+
+    const timer = setTimeout(() => {
+      const currentConfig = {
+        backgroundColor, paddingVertical, paddingHorizontal, borderRadius,
+        hasImage, imageUrl, imageHeight, imageMarginBottom,
+        titleText, titleColor, titleSize, bodyText, bodyColor, bodySize,
+        hasButton, buttonText, buttonBg, buttonTextColor, buttonRadius,
+        emailBlocks,
+        templateName
+      };
+
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        config: currentConfig,
+        timestamp: new Date().toISOString()
+      }));
+      setLastSaved(new Date());
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [
+    emailBlocks, backgroundColor, paddingVertical, paddingHorizontal, borderRadius,
+    hasImage, imageUrl, imageHeight, imageMarginBottom,
+    titleText, titleColor, titleSize, bodyText, bodyColor, bodySize,
+    hasButton, buttonText, buttonBg, buttonTextColor, buttonRadius,
+    templateName, isDirty
+  ]);
+
+  // Session recovery check on mount
+  useEffect(() => {
+    const draftJson = localStorage.getItem(STORAGE_KEY);
+    if (draftJson) {
+      try {
+        const draft = JSON.parse(draftJson);
+        if (draft && draft.config && draft.config.emailBlocks) {
+          // Check if current state is clean/default
+          const isClean = emailBlocks.length === defaultBlocks.length && 
+                          emailBlocks.every((b, i) => b.id === defaultBlocks[i].id) &&
+                          backgroundColor === "#ffffff" &&
+                          templateName === "Brand Blueprint";
+
+          if (isClean) {
+            // Wrap in setTimeout to avoid synchronous setState in effect (lint)
+            setTimeout(() => {
+              setRecoveredDraft(draft);
+              setShowRecoveryDialog(true);
+            }, 0);
+          }
+        }
+      } catch (e) {
+        console.error("Failed to parse draft", e);
+      }
+    }
+  }, []); // Run once on mount
+
+  const handleRestoreDraft = () => {
+    if (!recoveredDraft) return;
+    loadTemplateConfig({
+      name: (recoveredDraft.config.templateName as string) || "Restored Draft",
+      config: recoveredDraft.config
+    });
+    setShowRecoveryDialog(false);
+    setLastSaved(new Date(recoveredDraft.timestamp));
+  };
+
+  const handleDiscardDraft = () => {
+    localStorage.removeItem(STORAGE_KEY);
+    setShowRecoveryDialog(false);
+    setRecoveredDraft(null);
+    setLastSaved(null);
+  };
+
+  // Mark dirty on any config change
   useEffect(() => {
     if (isIgnoreDirty.current) {
       isIgnoreDirty.current = false;
       return;
     }
     setIsDirty(true);
-  }, [emailBlocks]);
+  }, [
+    emailBlocks, backgroundColor, paddingVertical, paddingHorizontal, borderRadius,
+    hasImage, imageUrl, imageHeight, imageMarginBottom,
+    titleText, titleColor, titleSize, bodyText, bodyColor, bodySize,
+    hasButton, buttonText, buttonBg, buttonTextColor, buttonRadius,
+    templateName
+  ]);
 
   // Browser guard for unsaved changes
   useEffect(() => {
@@ -155,7 +261,7 @@ export default function EmailBuilderDashboard() {
   // Clean up stale selectedBlockId
   useEffect(() => {
     if (selectedBlockId && !emailBlocks.some(b => b.id === selectedBlockId)) {
-      setSelectedBlockId(null);
+      setTimeout(() => setSelectedBlockId(null), 0);
     }
   }, [emailBlocks, selectedBlockId]);
 
@@ -292,6 +398,8 @@ export default function EmailBuilderDashboard() {
       alert(error.message);
     } else {
       setIsDirty(false); // Reset dirty state on success
+      localStorage.removeItem(STORAGE_KEY); // Clear draft on manual save
+      setLastSaved(null);
       fetchSavedTemplates();
     }
   };
@@ -332,6 +440,13 @@ export default function EmailBuilderDashboard() {
       const sanitized = sanitizeBlocks(cfg.emailBlocks);
       setEmailBlocks(sanitized);
     }
+
+    // Overwrite localStorage draft with the newly loaded template
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      config: cfg,
+      timestamp: new Date().toISOString()
+    }));
+    setLastSaved(new Date());
   };
 
   const handleDeleteTemplate = async (e: React.MouseEvent, templateId: string) => {
@@ -350,46 +465,108 @@ export default function EmailBuilderDashboard() {
     }
   };
 
+  const compileBlock = (block: EmailBlock) => {
+    switch (block.type) {
+      case "hero_image":
+        return `
+          <tr>
+            <td align="center" style="padding-bottom: ${block.style.marginBottom?.[0] || 24}px;">
+              <img src="${block.content.imageUrl}" alt="Banner" width="600" height="${block.style.height?.[0] || 200}" border="0" style="display: block; width: 100%; max-width: 600px; height: auto; border-radius: 8px;" />
+            </td>
+          </tr>`;
+      case "heading":
+        return `
+          <tr>
+            <td align="left" style="padding-bottom: 16px; font-family: sans-serif;">
+              <h1 style="margin: 0; font-size: ${block.style.fontSize?.[0] || 32}px; line-height: 1.2; font-weight: 800; color: ${block.style.color || '#000000'}; letter-spacing: -0.02em;">
+                ${block.content.text}
+              </h1>
+            </td>
+          </tr>`;
+      case "body_text":
+        return `
+          <tr>
+            <td align="left" style="padding-bottom: 24px; font-family: sans-serif;">
+              <p style="margin: 0; font-size: ${block.style.fontSize?.[0] || 16}px; line-height: 1.6; font-weight: 400; color: ${block.style.color || '#444444'};">
+                ${block.content.text}
+              </p>
+            </td>
+          </tr>`;
+      case "divider":
+        return `
+          <tr>
+            <td align="center" style="padding-top: ${block.style.marginTop?.[0] || 20}px; padding-bottom: ${block.style.marginBottom?.[0] || 20}px;">
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation">
+                <tr>
+                  <td style="border-bottom: 1px solid ${block.style.color || '#e5e7eb'}; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                </tr>
+              </table>
+            </td>
+          </tr>`;
+      case "cta_button":
+        const btnBg = block.style.backgroundColor || "#000000";
+        const btnText = block.content.text || "Click Here";
+        const btnUrl = block.content.url || "#";
+        const btnRadius = block.style.borderRadius?.[0] || 6;
+        const btnColor = block.style.textColor || "#ffffff";
+        
+        return `
+          <tr>
+            <td align="left" style="padding-top: 16px; padding-bottom: 16px;">
+              <!--[if mso]>
+                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${btnUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="${Math.round((btnRadius/48)*100)}%" stroke="f" fillcolor="${btnBg}">
+                  <w:anchorlock/>
+                  <center style="color:${btnColor};font-family:sans-serif;font-size:16px;font-weight:bold;">${btnText}</center>
+                </v:roundrect>
+              <![endif]-->
+              <a href="${btnUrl}" style="background-color:${btnBg};border-radius:${btnRadius}px;color:${btnColor};display:inline-block;font-family:sans-serif;font-size:16px;font-weight:bold;line-height:48px;text-align:center;text-decoration:none;width:200px;-webkit-text-size-adjust:none;mso-hide:all;">${btnText}</a>
+            </td>
+          </tr>`;
+      default:
+        return "";
+    }
+  };
+
   const generateHTMLCode = () => {
+    const compiledBlocks = emailBlocks.map(block => compileBlock(block)).join("");
+
     return `<!DOCTYPE html>
-<html>
+<html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Responsive Component</title>
+  <!--[if mso]>
+  <xml>
+    <o:OfficeDocumentSettings>
+      <o:PixelsPerInch>96</o:PixelsPerInch>
+    </o:OfficeDocumentSettings>
+  </xml>
+  <![endif]-->
+  <title>Modular Email Template</title>
 </head>
-<body style="margin: 0; padding: 0; background-color: #f8f9fa; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
-  <table border="0" cellpadding="0" cellspacing="0" width="100%" style="background-color: #f8f9fa; padding: 40px 0;">
+<body style="margin: 0; padding: 0; background-color: #f8f9fa; font-family: sans-serif;">
+  <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="background-color: #f8f9fa; padding: 40px 0;">
     <tr>
       <td align="center">
-        <table border="0" cellpadding="0" cellspacing="0" width="100%" style="max-width: 600px; background-color: ${backgroundColor}; border-radius: ${borderRadius[0]}px; border-collapse: separate; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
+        <!--[if mso]>
+        <table align="center" border="0" cellspacing="0" cellpadding="0" width="600" role="presentation">
+        <tr>
+        <td align="center" valign="top" width="600">
+        <![endif]-->
+        <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation" style="max-width: 600px; background-color: ${backgroundColor}; border-radius: ${borderRadius[0]}px; border-collapse: separate; box-shadow: 0 10px 30px rgba(0,0,0,0.05);">
           <tr>
             <td style="padding: ${paddingVertical[0]}px ${paddingHorizontal[0]}px; text-align: left;">
-              ${hasImage ? `
-              <div style="margin-bottom: ${imageMarginBottom[0]}px;">
-                <img src="${imageUrl}" alt="Banner" height="${imageHeight[0]}" style="display: block; width: 100%; height: ${imageHeight[0]}px; object-fit: cover; border-radius: 8px;" />
-              </div>
-              ` : ''}
-              <h1 style="margin: 0 0 16px 0; font-size: ${titleSize[0]}px; line-height: 1.2; font-weight: 800; color: ${titleColor}; letter-spacing: -0.02em;">
-                ${titleText}
-              </h1>
-              <p style="margin: 0 0 32px 0; font-size: ${bodySize[0]}px; line-height: 1.6; font-weight: 400; color: ${bodyColor};">
-                ${bodyText}
-              </p>
-              ${hasButton ? `
-              <table border="0" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center" style="background-color: ${buttonBg}; border-radius: ${buttonRadius[0]}px;">
-                    <a href="#" style="display: inline-block; padding: 14px 28px; font-size: 16px; font-weight: 600; color: ${buttonTextColor}; text-decoration: none; border-radius: ${buttonRadius[0]}px;">
-                      ${buttonText}
-                    </a>
-                  </td>
-                </tr>
+              <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation">
+                ${compiledBlocks}
               </table>
-              ` : ''}
             </td>
           </tr>
         </table>
+        <!--[if mso]>
+        </td>
+        </tr>
+        </table>
+        <![endif]-->
       </td>
     </tr>
   </table>
@@ -405,7 +582,7 @@ export default function EmailBuilderDashboard() {
   const renderBlock = (block: EmailBlock) => {
     const isSelected = selectedBlockId === block.id;
     const selectionStyle: React.CSSProperties = {
-      outline: isSelected ? `2px solid ${colors.brown}` : "none",
+      outline: isSelected ? `2px solid #3b82f6` : "none",
       outlineOffset: "4px",
       cursor: "pointer",
       position: "relative",
@@ -419,10 +596,10 @@ export default function EmailBuilderDashboard() {
     switch (block.type) {
       case "hero_image":
         return (
-          <div 
+          <div
             key={block.id} 
             onClick={onClick}
-            style={{ ...selectionStyle, marginBottom: `${block.style.marginBottom[0]}px` }} 
+            style={{ ...selectionStyle, marginBottom: `${block.style.marginBottom?.[0] ?? 24}px` }} 
             className="animate-in fade-in slide-in-from-top duration-1000 ease-out group"
           >
             <img 
@@ -430,7 +607,7 @@ export default function EmailBuilderDashboard() {
               alt="Hero" 
               style={{ 
                 width: "100%", 
-                height: `${block.style.height[0]}px`, 
+                height: `${block.style.height?.[0] ?? 200}px`,
                 objectFit: "cover",
                 borderRadius: "12px"
               }} 
@@ -446,7 +623,7 @@ export default function EmailBuilderDashboard() {
             style={{
               ...selectionStyle,
               color: block.style.color,
-              fontSize: `${block.style.fontSize[0]}px`,
+              fontSize: `${block.style.fontSize?.[0] ?? 32}px`,
               fontWeight: 800,
               margin: 0,
               lineHeight: "1.1",
@@ -466,7 +643,7 @@ export default function EmailBuilderDashboard() {
             style={{
               ...selectionStyle,
               color: block.style.color,
-              fontSize: `${block.style.fontSize[0]}px`,
+              fontSize: `${block.style.fontSize?.[0] ?? 16}px`,
               fontWeight: 400,
               margin: 0,
               lineHeight: "1.6",
@@ -485,8 +662,8 @@ export default function EmailBuilderDashboard() {
             onClick={onClick}
             style={{ 
               ...selectionStyle,
-              marginTop: `${block.style.marginTop[0]}px`, 
-              marginBottom: `${block.style.marginBottom[0]}px`,
+              marginTop: `${block.style.marginTop?.[0] ?? 16}px`, 
+              marginBottom: `${block.style.marginBottom?.[0] ?? 16}px`,
               height: "1px",
               backgroundColor: block.style.color
             }} 
@@ -502,7 +679,7 @@ export default function EmailBuilderDashboard() {
               fontSize: "16px",
               fontWeight: 600,
               border: "none",
-              borderRadius: `${block.style.borderRadius[0]}px`,
+              borderRadius: `${block.style.borderRadius?.[0] ?? 8}px`,
               cursor: "pointer",
               transition: "all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1)",
               boxShadow: "0 4px 16px rgba(0,0,0,0.12)",
@@ -596,12 +773,22 @@ export default function EmailBuilderDashboard() {
                     <CheckCircle2 size={14} style={{ color: colors.brown }} />
                     <span className="text-[10px] font-bold uppercase tracking-wider transition-colors" style={{ color: colors.grey }}>{user?.email}</span>
                   </div>
-                  {isDirty && (
-                    <div className="flex items-center gap-1 animate-pulse">
-                      <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-                      <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Unsaved</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {lastSaved && (
+                      <div className="flex items-center gap-1 opacity-60">
+                        <Clock size={10} style={{ color: colors.grey }} />
+                        <span className="text-[9px] font-bold uppercase tracking-tighter transition-colors" style={{ color: colors.grey }}>
+                          Draft saved {lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      </div>
+                    )}
+                    {isDirty && (
+                      <div className="flex items-center gap-1 animate-pulse">
+                        <div className="w-1.5 h-1.5 rounded-full bg-orange-500" />
+                        <span className="text-[9px] font-bold text-orange-500 uppercase tracking-tighter">Unsaved</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <Input 
                   type="text" 
@@ -719,33 +906,75 @@ export default function EmailBuilderDashboard() {
 
               <TabsContent value="blocks" className="space-y-6 animate-in fade-in duration-500 ease-out outline-none">
                 <div className="space-y-4">
-                  <h3 className="text-[10px] font-bold uppercase tracking-widest" style={{ color: colors.grey }}>Layers</h3>
-                  <div className="space-y-2 max-h-[200px] overflow-y-auto pr-2 scrollbar-hide">
-                    {emailBlocks.map((block) => (
-                      <div 
-                        key={block.id}
-                        onClick={() => setSelectedBlockId(block.id)}
-                        className="p-3 rounded-lg border cursor-pointer transition-all duration-300 flex items-center justify-between hover:shadow-sm"
-                        style={{ 
-                          backgroundColor: selectedBlockId === block.id ? "white" : colors.offwhite2,
-                          borderColor: selectedBlockId === block.id ? colors.brown : colors.greyLight
-                        }}
-                      >
-                        <div className="flex items-center gap-3">
-                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: colors.grey }} />
-                          <span className="text-xs font-medium capitalize">{block.type.replace('_', ' ')}</span>
-                        </div>
-                        <button 
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEmailBlocks(emailBlocks.filter(b => b.id !== block.id));
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-2" style={{ color: colors.grey }}>
+                      <LayersIcon size={12} />
+                      LAYERS · {emailBlocks.length}
+                    </h3>
+                  </div>
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
+                    {emailBlocks.map((block, index) => {
+                      const isSelected = selectedBlockId === block.id;
+                      const blockTypeLabel = block.type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                      
+                      let previewText = "";
+                      if (block.type === 'hero_image') previewText = block.content.imageUrl || "";
+                      else if (block.type === 'cta_button') previewText = block.content.text || "";
+                      else if (block.content.text) previewText = block.content.text;
+
+                      return (
+                        <div 
+                          key={block.id}
+                          onClick={() => setSelectedBlockId(block.id)}
+                          className={`p-2 rounded-lg border cursor-pointer transition-all duration-200 flex items-center justify-between group ${isSelected ? 'bg-blue-50/50 border-blue-200 shadow-sm' : 'bg-white border-stone-100 hover:border-stone-200'}`}
+                          style={{ 
+                            borderLeftWidth: isSelected ? '4px' : '1px',
+                            borderLeftColor: isSelected ? '#3b82f6' : undefined
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:text-red-500 transition-all"
                         >
-                          <Trash2 size={12} />
-                        </button>
-                      </div>
-                    ))}
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className={`${isSelected ? 'text-blue-500' : 'text-stone-400'}`}>
+                              {block.type === 'hero_image' && <ImageIcon size={14} />}
+                              {block.type === 'heading' && <Heading1 size={14} />}
+                              {block.type === 'body_text' && <AlignLeft size={14} />}
+                              {block.type === 'cta_button' && <MousePointerClick size={14} />}
+                              {block.type === 'divider' && <Minus size={14} />}
+                            </div>
+                            <div className="min-w-0">
+                              <p className={`text-[11px] font-bold ${isSelected ? 'text-blue-900' : 'text-stone-700'}`}>{blockTypeLabel}</p>
+                              <p className="text-[9px] text-stone-400 truncate max-w-[120px]">{previewText}</p>
+                            </div>
+                          </div>
+                          
+                          <div className="flex items-center gap-1">
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); moveBlock(block.id, 'up'); }}
+                              disabled={index === 0}
+                              aria-label="Move block up"
+                              className="p-1 text-stone-400 hover:text-blue-500 disabled:opacity-0 transition-colors"
+                            >
+                              <ArrowUp size={12} />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); moveBlock(block.id, 'down'); }}
+                              disabled={index === emailBlocks.length - 1}
+                              aria-label="Move block down"
+                              className="p-1 text-stone-400 hover:text-blue-500 disabled:opacity-0 transition-colors"
+                            >
+                              <ArrowDown size={12} />
+                            </button>
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); removeBlock(block.id); }}
+                              disabled={emailBlocks.length === 1}
+                              aria-label="Delete block"
+                              className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-20 transition-colors"
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-4 border-t" style={{ borderColor: colors.greyLight }}>
@@ -798,7 +1027,7 @@ export default function EmailBuilderDashboard() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
                           <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: colors.grey }}>Font Size</label>
-                          <span className="text-[10px] font-mono">{emailBlocks.find(b => b.id === selectedBlockId)?.style.fontSize[0]}px</span>
+                          <span className="text-[10px] font-mono">{emailBlocks.find(b => b.id === selectedBlockId)?.style.fontSize?.[0]}px</span>
                         </div>
                         <Slider 
                           min={12} max={64} step={1} 
@@ -880,17 +1109,41 @@ export default function EmailBuilderDashboard() {
       </div>
 
       {/* PREVIEW */}
-      <div className="flex-1 p-12 overflow-y-auto flex items-start justify-center transition-colors duration-500" style={{ backgroundColor: colors.offwhite2 }}>
-        <div className="w-full max-w-[640px] animate-in fade-in zoom-in-95 duration-1000">
-          <div className="rounded-[24px] shadow-xl border transition-all duration-500 overflow-hidden" style={{ 
-            backgroundColor: colors.offwhite,
-            borderColor: colors.greyLight,
-            boxShadow: "0 20px 60px -16px rgba(0,0,0,0.12)"
-          }}>
+      <div className="flex-1 p-12 overflow-y-auto flex flex-col items-center transition-colors duration-500" style={{ backgroundColor: colors.offwhite2 }}>
+        {/* Viewport Toggle */}
+        <div className="mb-8 flex items-center bg-stone-200/50 p-1 rounded-lg border border-stone-200 animate-in fade-in slide-in-from-top duration-700">
+          <button 
+            onClick={() => setViewportMode('desktop')}
+            className={`p-1.5 rounded-md transition-all duration-200 ${viewportMode === 'desktop' ? 'bg-zinc-900 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-600'}`}
+            aria-label="Desktop View"
+          >
+            <Monitor size={18} />
+          </button>
+          <button 
+            onClick={() => setViewportMode('mobile')}
+            className={`p-1.5 rounded-md transition-all duration-200 ${viewportMode === 'mobile' ? 'bg-zinc-900 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-600'}`}
+            aria-label="Mobile View"
+          >
+            <Smartphone size={18} />
+          </button>
+        </div>
+
+        <div 
+          className="w-full transition-all duration-500 ease-in-out flex justify-center animate-in fade-in zoom-in-95 duration-1000"
+          style={{ maxWidth: viewportMode === 'desktop' ? '600px' : '375px' }}
+        >
+          <div 
+            className={`w-full transition-all duration-500 overflow-hidden ${viewportMode === 'mobile' ? 'border-[12px] border-zinc-800 rounded-[48px] shadow-2xl' : 'rounded-[24px] shadow-xl border'}`}
+            style={{ 
+              backgroundColor: colors.offwhite,
+              borderColor: viewportMode === 'mobile' ? '#27272a' : colors.greyLight,
+              boxShadow: viewportMode === 'mobile' ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)' : "0 20px 60px -16px rgba(0,0,0,0.12)"
+            }}
+          >
             <div style={{
               backgroundColor: backgroundColor,
               padding: `${paddingVertical[0]}px ${paddingHorizontal[0]}px`,
-              borderRadius: `${borderRadius[0]}px`,
+              borderRadius: viewportMode === 'mobile' ? '0px' : `${borderRadius[0]}px`,
               transition: "all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)"
             }}>
               {emailBlocks.map((block, index) => {
@@ -966,16 +1219,35 @@ export default function EmailBuilderDashboard() {
               </div>
             </div>
           </div>          
-          <div className="mt-8 flex items-center justify-center gap-6 text-[10px] font-bold uppercase tracking-widest animate-in fade-in" style={{ color: colors.grey }}>
+          <div className="mt-8 mb-4 flex items-center justify-center gap-6 text-[10px] font-bold uppercase tracking-widest animate-in fade-in" style={{ color: colors.grey }}>
             <div className="flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: colors.brown }} />
               Live Preview
             </div>
             <div className="w-1 h-1 rounded-full" style={{ backgroundColor: colors.greyLight }} />
-            <span>Responsive Viewport</span>
+            <span>{viewportMode === 'desktop' ? 'Desktop 600px' : 'Mobile 375px'}</span>
           </div>
         </div>
       </div>
+
+      <Dialog open={showRecoveryDialog} onOpenChange={setShowRecoveryDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Restore Unsaved Draft?</DialogTitle>
+            <DialogDescription>
+              We found an unsaved draft from {recoveredDraft ? new Date(recoveredDraft.timestamp).toLocaleString() : 'recently'}. Would you like to restore it?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-2 justify-end mt-4">
+            <Button variant="outline" onClick={handleDiscardDraft}>
+              Discard
+            </Button>
+            <Button onClick={handleRestoreDraft} style={{ backgroundColor: colors.black }} className="text-white">
+              Restore Draft
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

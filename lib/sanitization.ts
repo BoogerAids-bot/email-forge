@@ -17,7 +17,7 @@ export function sanitizeBlocks(blocks: unknown): EmailBlock[] {
   const sanitized: EmailBlock[] = [];
 
   blocks.forEach((item, index) => {
-    const block = item as any;
+    const block = item as EmailBlock;
     
     // 1. Filter out invalid types
     if (!block || !VALID_BLOCK_TYPES.includes(block.type)) {
