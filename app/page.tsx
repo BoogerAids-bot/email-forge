@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
@@ -31,10 +32,9 @@ import {
   Moon,
   Sun
 } from "lucide-react";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 import { User } from "@supabase/supabase-js";
-import { EmailBlock, EmailBlockType } from "@/types/email";
-import { sanitizeBlocks } from "@/lib/sanitization";
+import { EmailBlock, EmailBlockType, EmailBlocksArraySchema, createBlock, EmailBlockSchema } from "@/types/email";
 import {
   Dialog,
   DialogContent,
@@ -109,13 +109,13 @@ const defaultBlocks: EmailBlock[] = [
 ];
 
 export default function EmailBuilderDashboard() {
+  const supabase = createClient();
+  const router = useRouter();
   // Theme State
   const [isDarkMode, setIsDarkMode] = useState(false);
 
   // Authentication & Cloud Sync State
   const [user, setUser] = useState<User | null>(null);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [templateName, setTemplateName] = useState("Brand Blueprint");
   const [isSaving, setIsSaving] = useState(false);
   const [savedTemplates, setSavedTemplates] = useState<Array<{ id: string; name: string; created_at: string; config: Record<string, unknown> }>>([]);
@@ -175,6 +175,11 @@ export default function EmailBuilderDashboard() {
   // Auto-save to localStorage
   useEffect(() => {
     if (isIgnoreDirty.current || !isDirty) return;
+
+    // Guard: only auto-save when emailBlocks.length > 0 OR when the user has explicitly performed an action
+    // isDirty already implies an action was performed, but we'll add the length check for clarity/safety
+    // especially on initial load if isDirty was somehow true.
+    if (emailBlocks.length === 0 && !isDirty) return;
 
     const timer = setTimeout(() => {
       const currentConfig = {
@@ -281,56 +286,40 @@ export default function EmailBuilderDashboard() {
   }, [emailBlocks, selectedBlockId]);
 
   const addBlock = (type: EmailBlockType) => {
-    const newBlock: EmailBlock = {
-      id: `block-${Date.now()}`,
-      type,
-      content: {},
-      style: {},
-    };
-
-    // Set default content/style based on type
-    switch (type) {
-      case "heading":
-        newBlock.content = { text: "New Heading" };
-        newBlock.style = { color: "#000000", fontSize: [24] };
-        break;
-      case "body_text":
-        newBlock.content = { text: "Add your text here..." };
-        newBlock.style = { color: "#444444", fontSize: [16] };
-        break;
-      case "divider":
-        newBlock.content = {};
-        newBlock.style = { marginTop: [20], marginBottom: [20], color: "#e5e7eb" };
-        break;
-      case "cta_button":
-        newBlock.content = { text: "Click Me", url: "#" };
-        newBlock.style = { backgroundColor: "#000000", textColor: "#ffffff", borderRadius: [6] };
-        break;
-      case "hero_image":
-        newBlock.content = { imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=600&auto=format&fit=crop" };
-        newBlock.style = { height: [200], marginBottom: [24] };
-        break;
-    }
-
+    const newBlock = createBlock(type);
     setEmailBlocks([...emailBlocks, newBlock]);
     setSelectedBlockId(newBlock.id);
   };
 
-  const moveBlock = (id: string, direction: "up" | "down") => {
+  const moveBlockUp = (id: string) => {
     const index = emailBlocks.findIndex((b) => b.id === id);
-    if (index === -1) return;
-    const newIndex = direction === "up" ? index - 1 : index + 1;
-    if (newIndex < 0 || newIndex >= emailBlocks.length) return;
-
+    if (index <= 0) return;
     const newBlocks = [...emailBlocks];
-    const [removed] = newBlocks.splice(index, 1);
-    newBlocks.splice(newIndex, 0, removed);
+    [newBlocks[index - 1], newBlocks[index]] = [newBlocks[index], newBlocks[index - 1]];
     setEmailBlocks(newBlocks);
   };
 
-  const removeBlock = (id: string) => {
-    if (emailBlocks.length <= 1) return;
-    setEmailBlocks(emailBlocks.filter((b) => b.id !== id));
+  const moveBlockDown = (id: string) => {
+    const index = emailBlocks.findIndex((b) => b.id === id);
+    if (index === -1 || index >= emailBlocks.length - 1) return;
+    const newBlocks = [...emailBlocks];
+    [newBlocks[index + 1], newBlocks[index]] = [newBlocks[index], newBlocks[index + 1]];
+    setEmailBlocks(newBlocks);
+  };
+
+  const deleteBlock = (id: string) => {
+    const index = emailBlocks.findIndex(b => b.id === id);
+    const newBlocks = emailBlocks.filter((b) => b.id !== id);
+    setEmailBlocks(newBlocks);
+    
+    if (selectedBlockId === id) {
+      if (newBlocks.length > 0) {
+        const nextIndex = index > 0 ? index - 1 : 0;
+        setSelectedBlockId(newBlocks[nextIndex].id);
+      } else {
+        setSelectedBlockId(null);
+      }
+    }
   };
 
   const fetchSavedTemplates = async () => {
@@ -364,30 +353,9 @@ export default function EmailBuilderDashboard() {
     return () => subscription.unsubscribe();
   }, []);
 
-  const handleAuth = async (type: "login" | "signup") => {
-    if (!email || !password) return alert("Please fill out your credentials.");
-    
-    if (type === "signup") {
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error) {
-        alert(error.message);
-      } else if (data?.user && data?.session === null) {
-        alert("Account registered! Please check your email or log in directly.");
-      } else {
-        alert("Account successfully registered and logged in!");
-      }
-    } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) {
-        alert(error.message);
-      } else {
-        setUser(data.user);
-      }
-    }
-  };
-
   const handleLogout = async () => {
     await supabase.auth.signOut();
+    router.push("/login");
   };
 
   const handleSaveTemplate = async () => {
@@ -450,10 +418,32 @@ export default function EmailBuilderDashboard() {
     setButtonRadius((cfg.buttonRadius as number[]) || [6]);
     setTemplateName(template.name as string);
 
-    // Load and sanitize modular blocks
+    // Load and validate modular blocks
     if (cfg.emailBlocks) {
-      const sanitized = sanitizeBlocks(cfg.emailBlocks);
-      setEmailBlocks(sanitized);
+      const result = EmailBlocksArraySchema.safeParse(cfg.emailBlocks);
+      if (result.success) {
+        setEmailBlocks(result.data);
+      } else {
+        // Attempt to recover valid blocks individually
+        const rawBlocks = cfg.emailBlocks as any[];
+        const validBlocks: EmailBlock[] = [];
+        let failedCount = 0;
+
+        rawBlocks.forEach((block) => {
+          const blockResult = EmailBlockSchema.safeParse(block);
+          if (blockResult.success) {
+            validBlocks.push(blockResult.data);
+          } else {
+            failedCount++;
+            console.warn(`Block ${block.id} failed validation:`, blockResult.error);
+          }
+        });
+
+        setEmailBlocks(validBlocks);
+        if (failedCount > 0) {
+          alert(`${failedCount} block(s) could not be restored — they may be from an older version.`);
+        }
+      }
     }
 
     // Overwrite localStorage draft with the newly loaded template
@@ -480,67 +470,88 @@ export default function EmailBuilderDashboard() {
     }
   };
 
+  const [compilerErrorCount, setCompilerErrorCount] = useState(0);
+
   const compileBlock = (block: EmailBlock) => {
-    switch (block.type) {
-      case "hero_image":
-        return `
-          <tr>
-            <td align="center" style="padding-bottom: ${block.style.marginBottom?.[0] || 24}px;">
-              <img src="${block.content.imageUrl}" alt="Banner" width="600" height="${block.style.height?.[0] || 200}" border="0" style="display: block; width: 100%; max-width: 600px; height: auto; border-radius: 8px;" />
-            </td>
-          </tr>`;
-      case "heading":
-        return `
-          <tr>
-            <td align="left" style="padding-bottom: 16px; font-family: sans-serif;">
-              <h1 style="margin: 0; font-size: ${block.style.fontSize?.[0] || 32}px; line-height: 1.2; font-weight: 800; color: ${block.style.color || '#000000'}; letter-spacing: -0.02em;">
-                ${block.content.text}
-              </h1>
-            </td>
-          </tr>`;
-      case "body_text":
-        return `
-          <tr>
-            <td align="left" style="padding-bottom: 24px; font-family: sans-serif;">
-              <p style="margin: 0; font-size: ${block.style.fontSize?.[0] || 16}px; line-height: 1.6; font-weight: 400; color: ${block.style.color || '#444444'};">
-                ${block.content.text}
-              </p>
-            </td>
-          </tr>`;
-      case "divider":
-        return `
-          <tr>
-            <td align="center" style="padding-top: ${block.style.marginTop?.[0] || 20}px; padding-bottom: ${block.style.marginBottom?.[0] || 20}px;">
-              <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation">
-                <tr>
-                  <td style="border-bottom: 1px solid ${block.style.color || '#e5e7eb'}; font-size: 1px; line-height: 1px;">&nbsp;</td>
-                </tr>
-              </table>
-            </td>
-          </tr>`;
-      case "cta_button":
-        const btnBg = block.style.backgroundColor || "#000000";
-        const btnText = block.content.text || "Click Here";
-        const btnUrl = block.content.url || "#";
-        const btnRadius = block.style.borderRadius?.[0] || 6;
-        const btnColor = block.style.textColor || "#ffffff";
-        
-        return `
-          <tr>
-            <td align="left" style="padding-top: 16px; padding-bottom: 16px;">
-              <!--[if mso]>
-                <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${btnUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="${Math.round((btnRadius/48)*100)}%" stroke="f" fillcolor="${btnBg}">
-                  <w:anchorlock/>
-                  <center style="color:${btnColor};font-family:sans-serif;font-size:16px;font-weight:bold;">${btnText}</center>
-                </v:roundrect>
-              <![endif]-->
-              <a href="${btnUrl}" style="background-color:${btnBg};border-radius:${btnRadius}px;color:${btnColor};display:inline-block;font-family:sans-serif;font-size:16px;font-weight:bold;line-height:48px;text-align:center;text-decoration:none;width:200px;-webkit-text-size-adjust:none;mso-hide:all;">${btnText}</a>
-            </td>
-          </tr>`;
-      default:
-        return "";
+    try {
+      switch (block.type) {
+        case "hero_image":
+          return `
+            <tr>
+              <td align="center" style="padding-bottom: ${block.style.marginBottom?.[0] || 24}px;">
+                <img src="${block.content.imageUrl}" alt="Banner" width="600" height="${block.style.height?.[0] || 200}" border="0" style="display: block; width: 100%; max-width: 600px; height: auto; border-radius: 8px;" />
+              </td>
+            </tr>`;
+        case "heading":
+          return `
+            <tr>
+              <td align="left" style="padding-bottom: 16px; font-family: sans-serif;">
+                <h1 style="margin: 0; font-size: ${block.style.fontSize?.[0] || 32}px; line-height: 1.2; font-weight: 800; color: ${block.style.color || '#000000'}; letter-spacing: -0.02em;">
+                  ${block.content.text}
+                </h1>
+              </td>
+            </tr>`;
+        case "body_text":
+          return `
+            <tr>
+              <td align="left" style="padding-bottom: 24px; font-family: sans-serif;">
+                <p style="margin: 0; font-size: ${block.style.fontSize?.[0] || 16}px; line-height: 1.6; font-weight: 400; color: ${block.style.color || '#444444'};">
+                  ${block.content.text}
+                </p>
+              </td>
+            </tr>`;
+        case "divider":
+          return `
+            <tr>
+              <td align="center" style="padding-top: ${block.style.marginTop?.[0] || 20}px; padding-bottom: ${block.style.marginBottom?.[0] || 20}px;">
+                <table border="0" cellpadding="0" cellspacing="0" width="100%" role="presentation">
+                  <tr>
+                    <td style="border-bottom: 1px solid ${block.style.color || '#e5e7eb'}; font-size: 1px; line-height: 1px;">&nbsp;</td>
+                  </tr>
+                </table>
+              </td>
+            </tr>`;
+        case "cta_button":
+          const btnBg = block.style.backgroundColor || "#000000";
+          const btnText = block.content.text || "Click Here";
+          const btnUrl = block.content.url || "#";
+          const btnRadius = block.style.borderRadius?.[0] || 6;
+          const btnColor = block.style.textColor || "#ffffff";
+          
+          return `
+            <tr>
+              <td align="left" style="padding-top: 16px; padding-bottom: 16px;">
+                <!--[if mso]>
+                  <v:roundrect xmlns:v="urn:schemas-microsoft-com:vml" xmlns:w="urn:schemas-microsoft-com:office:word" href="${btnUrl}" style="height:48px;v-text-anchor:middle;width:200px;" arcsize="${Math.round((btnRadius/48)*100)}%" stroke="f" fillcolor="${btnBg}">
+                    <w:anchorlock/>
+                    <center style="color:${btnColor};font-family:sans-serif;font-size:16px;font-weight:bold;">${btnText}</center>
+                  </v:roundrect>
+                <![endif]-->
+                <a href="${btnUrl}" style="background-color:${btnBg};border-radius:${btnRadius}px;color:${btnColor};display:inline-block;font-family:sans-serif;font-size:16px;font-weight:bold;line-height:48px;text-align:center;text-decoration:none;width:200px;-webkit-text-size-adjust:none;mso-hide:all;">${btnText}</a>
+              </td>
+            </tr>`;
+        default:
+          return "";
+      }
+    } catch (error) {
+      console.error(`Block ${block.id} failed to render:`, error);
+      return `<!-- block ${block.id} failed to render: ${error instanceof Error ? error.message : String(error)} -->`;
     }
   };
+
+  // Update compiler error count on block changes
+  useEffect(() => {
+    let errorCount = 0;
+    emailBlocks.forEach(block => {
+      try {
+        const html = compileBlock(block);
+        if (html.startsWith("<!-- block")) errorCount++;
+      } catch (e) {
+        errorCount++;
+      }
+    });
+    setCompilerErrorCount(errorCount);
+  }, [emailBlocks]);
 
   const generateHTMLCode = () => {
     const compiledBlocks = emailBlocks.map(block => compileBlock(block)).join("");
@@ -713,12 +724,14 @@ export default function EmailBuilderDashboard() {
     }
   };
 
+  const selectedBlock = selectedBlockId ? emailBlocks.find(b => b.id === selectedBlockId) : null;
+
   return (
     <div className={`flex h-screen w-screen overflow-hidden font-['Inter',_'Poppins',_system-ui,_-apple-system] transition-colors duration-500 ${isDarkMode ? 'bg-[#121214] text-zinc-100' : 'bg-[#f4f4f5] text-[#000000]'}`}
       style={isDarkMode ? {} : { backgroundColor: colors.offwhite2 }}>
       {/* SIDEBAR */}
-      <div className={`w-[400px] border-r shadow-2xl flex flex-col h-full shrink-0 z-10 transition-all duration-500 ${isDarkMode ? 'bg-[#1a1a1e] border-zinc-800' : 'bg-white'}`}>
-        <div className={`p-8 border-b flex items-center justify-between transition-all duration-300 ${isDarkMode ? 'border-zinc-800 bg-[#1a1a1e]/50' : 'border-zinc-200 bg-white/40'}`}>
+      <div className={`w-[400px] border-r shadow-2xl flex flex-col h-full shrink-0 z-10 transition-all duration-500 glass-liquid-thick ${isDarkMode ? 'border-zinc-800' : ''}`}>
+        <div className={`p-8 border-b flex items-center justify-between transition-all duration-300 glass-liquid ${isDarkMode ? 'border-zinc-800' : 'border-zinc-200'}`}>
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-lg flex items-center justify-center transition-all duration-300 hover:scale-110" style={{ backgroundColor: colors.black }}>
               <div className="w-3 h-3 rotate-45 transition-transform" style={{ backgroundColor: colors.offwhite }} />
@@ -750,27 +763,16 @@ export default function EmailBuilderDashboard() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-8 py-6 space-y-8 scrollbar-hide">
-          {!user ? (
-            <div className="space-y-4 animate-in slide-in-from-top duration-700 ease-out">
-              <div className="space-y-1">
-                <h3 className={`text-sm font-semibold flex items-center gap-2 transition-colors ${isDarkMode ? 'text-zinc-100' : 'text-black'}`}>
-                  <Cloud size={16} className={isDarkMode ? 'text-zinc-400' : 'text-gray-500'} />
-                  Cloud Storage
-                </h3>
-                <p className={`text-xs transition-colors ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Save and sync your templates across devices.</p>
-              </div>
-              <div className="space-y-3">
-                <Input type="email" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} className={`text-sm h-10 border transition-all duration-300 focus:ring-2 focus:ring-offset-0 ${isDarkMode ? 'bg-zinc-800/50 border-zinc-700 text-zinc-100 placeholder:text-zinc-500' : 'bg-white border-zinc-200 text-black'}`} />
-                <Input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} className={`text-sm h-10 border transition-all duration-300 focus:ring-2 focus:ring-offset-0 ${isDarkMode ? 'bg-zinc-800/50 border-zinc-700 text-zinc-100 placeholder:text-zinc-500' : 'bg-white border-zinc-200 text-black'}`} />
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <Button onClick={() => handleAuth("login")} className={`text-xs h-10 font-bold transition-all duration-300 active:scale-95 hover:shadow-lg ${isDarkMode ? 'bg-zinc-900 text-white hover:bg-zinc-800' : 'bg-black text-white hover:bg-zinc-900'}`}>Log In</Button>
-                  <Button onClick={() => handleAuth("signup")} variant="outline" className={`text-xs h-10 font-bold transition-all duration-300 active:scale-95 hover:shadow-md ${isDarkMode ? 'border-zinc-700 text-zinc-100 hover:bg-zinc-800/50' : 'border-zinc-200 text-black hover:bg-zinc-50'}`}>Sign Up</Button>
-                </div>
-              </div>
+          <div className="space-y-6 animate-in slide-in-from-top duration-700 ease-out">
+            <div className="space-y-1">
+              <h3 className={`text-sm font-semibold flex items-center gap-2 transition-colors ${isDarkMode ? 'text-zinc-100' : 'text-black'}`}>
+                <Cloud size={16} className={isDarkMode ? 'text-zinc-400' : 'text-gray-500'} />
+                Cloud Storage
+              </h3>
+              <p className={`text-xs transition-colors ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Your templates are securely synced to the cloud.</p>
             </div>
-          ) : (
-            <div className="space-y-6 animate-in slide-in-from-top duration-700 ease-out">
-              <div className={`p-4 rounded-xl border space-y-3 transition-all duration-300 shadow-sm ${isDarkMode ? 'bg-zinc-800/30 border-zinc-700' : 'bg-zinc-50 border-zinc-200'}`}>
+
+            <div className={`p-4 rounded-xl border space-y-3 transition-all duration-300 glass-float ${isDarkMode ? 'border-zinc-700' : 'border-zinc-200'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <CheckCircle2 size={14} style={{ color: colors.brown }} />
@@ -846,7 +848,6 @@ export default function EmailBuilderDashboard() {
                 </div>
               )}
             </div>
-          )}
 
           <Separator style={{ backgroundColor: isDarkMode ? '#3f3f46' : colors.greyLight }} />
 
@@ -906,68 +907,74 @@ export default function EmailBuilderDashboard() {
                     </h3>
                   </div>
                   <div className="space-y-2 max-h-[300px] overflow-y-auto pr-2 scrollbar-hide">
-                    {emailBlocks.map((block, index) => {
-                      const isSelected = selectedBlockId === block.id;
-                      const blockTypeLabel = block.type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
-                      
-                      let previewText = "";
-                      if (block.type === 'hero_image') previewText = block.content.imageUrl || "";
-                      else if (block.type === 'cta_button') previewText = block.content.text || "";
-                      else if (block.content.text) previewText = block.content.text;
+                    {emailBlocks.length === 0 ? (
+                      <div className={`p-8 rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-3 transition-colors ${isDarkMode ? 'border-zinc-800 bg-zinc-900/20' : 'border-zinc-100 bg-zinc-50/50'}`}>
+                        <LayersIcon size={24} className={isDarkMode ? 'text-zinc-600' : 'text-zinc-300'} />
+                        <p className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-500' : 'text-zinc-400'}`}>No blocks yet</p>
+                      </div>
+                    ) : (
+                      emailBlocks.map((block, index) => {
+                        const isSelected = selectedBlockId === block.id;
+                        const blockTypeLabel = block.type.split('_').map(word => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+                        
+                        let previewText = "";
+                        if (block.type === 'hero_image') previewText = block.content.imageUrl || "";
+                        else if (block.type === 'cta_button') previewText = block.content.text || "";
+                        else if (block.content.text) previewText = block.content.text;
 
-                      return (
-                        <div 
-                          key={block.id}
-                          onClick={() => setSelectedBlockId(block.id)}
-                          className={`p-2 rounded-lg border cursor-pointer transition-all duration-200 flex items-center justify-between group ${isSelected ? 'bg-blue-50/50 border-blue-200 shadow-sm' : 'bg-white border-stone-100 hover:border-stone-200'}`}
-                          style={{ 
-                            borderLeftWidth: isSelected ? '4px' : '1px',
-                            borderLeftColor: isSelected ? '#3b82f6' : undefined
-                          }}
-                        >
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className={`${isSelected ? 'text-blue-500' : 'text-stone-400'}`}>
-                              {block.type === 'hero_image' && <ImageIcon size={14} />}
-                              {block.type === 'heading' && <Heading1 size={14} />}
-                              {block.type === 'body_text' && <AlignLeft size={14} />}
-                              {block.type === 'cta_button' && <MousePointerClick size={14} />}
-                              {block.type === 'divider' && <Minus size={14} />}
+                        return (
+                          <div 
+                            key={block.id}
+                            onClick={() => setSelectedBlockId(block.id)}
+                            className={`p-2 rounded-lg border cursor-pointer transition-all duration-200 flex items-center justify-between group ${isSelected ? 'bg-blue-50/50 border-blue-200 shadow-sm' : 'bg-white border-stone-100 hover:border-stone-200'}`}
+                            style={{ 
+                              borderLeftWidth: isSelected ? '4px' : '1px',
+                              borderLeftColor: isSelected ? '#3b82f6' : undefined
+                            }}
+                          >
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className={`${isSelected ? 'text-blue-500' : 'text-stone-400'}`}>
+                                {block.type === 'hero_image' && <ImageIcon size={14} />}
+                                {block.type === 'heading' && <Heading1 size={14} />}
+                                {block.type === 'body_text' && <AlignLeft size={14} />}
+                                {block.type === 'cta_button' && <MousePointerClick size={14} />}
+                                {block.type === 'divider' && <Minus size={14} />}
+                              </div>
+                              <div className="min-w-0">
+                                <p className={`text-[11px] font-bold ${isSelected ? 'text-blue-900' : 'text-stone-700'}`}>{blockTypeLabel}</p>
+                                <p className="text-[9px] text-stone-400 truncate max-w-[120px]">{previewText}</p>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className={`text-[11px] font-bold ${isSelected ? 'text-blue-900' : 'text-stone-700'}`}>{blockTypeLabel}</p>
-                              <p className="text-[9px] text-stone-400 truncate max-w-[120px]">{previewText}</p>
+                            
+                            <div className="flex items-center gap-1">
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); moveBlockUp(block.id); }}
+                                disabled={index === 0}
+                                aria-label="Move block up"
+                                className="p-1 text-stone-400 hover:text-blue-500 disabled:text-stone-200 disabled:cursor-not-allowed transition-colors"
+                              >
+                                <ArrowUp size={12} />
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); moveBlockDown(block.id); }}
+                                disabled={index === emailBlocks.length - 1}
+                                aria-label="Move block down"
+                                className="p-1 text-stone-400 hover:text-blue-500 disabled:text-stone-200 disabled:cursor-not-allowed transition-colors"
+                              >
+                                <ArrowDown size={12} />
+                              </button>
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); deleteBlock(block.id); }}
+                                aria-label="Delete block"
+                                className="p-1 text-stone-400 hover:text-red-500 transition-colors"
+                              >
+                                <Trash2 size={12} />
+                              </button>
                             </div>
                           </div>
-                          
-                          <div className="flex items-center gap-1">
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); moveBlock(block.id, 'up'); }}
-                              disabled={index === 0}
-                              aria-label="Move block up"
-                              className="p-1 text-stone-400 hover:text-blue-500 disabled:opacity-0 transition-colors"
-                            >
-                              <ArrowUp size={12} />
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); moveBlock(block.id, 'down'); }}
-                              disabled={index === emailBlocks.length - 1}
-                              aria-label="Move block down"
-                              className="p-1 text-stone-400 hover:text-blue-500 disabled:opacity-0 transition-colors"
-                            >
-                              <ArrowDown size={12} />
-                            </button>
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); removeBlock(block.id); }}
-                              disabled={emailBlocks.length === 1}
-                              aria-label="Delete block"
-                              className="p-1 text-stone-400 hover:text-red-500 disabled:opacity-20 transition-colors"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                    )}
                   </div>
 
                   <div className="grid grid-cols-2 gap-2 pt-4 border-t" style={{ borderColor: colors.greyLight }}>
@@ -979,23 +986,23 @@ export default function EmailBuilderDashboard() {
                   </div>
                 </div>
 
-                {selectedBlockId && (
+                {selectedBlock && (
                   <div className="space-y-6 pt-6 border-t animate-in slide-in-from-bottom duration-500" style={{ borderColor: colors.greyLight }}>
                     <div className="flex items-center justify-between">
-                      <h3 className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-orange-400' : 'text-orange-600'}`}>Editing: {emailBlocks.find(b => b.id === selectedBlockId)?.type.replace('_', ' ')}</h3>
+                      <h3 className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-orange-400' : 'text-orange-600'}`}>Editing: {selectedBlock.type.replace('_', ' ')}</h3>
                       <Button variant="ghost" size="sm" onClick={() => setSelectedBlockId(null)} className="h-6 text-[10px]">Close</Button>
                     </div>
 
-                    {emailBlocks.find(b => b.id === selectedBlockId)?.content.text !== undefined && (
+                    {('text' in selectedBlock.content) && (
                       <div className="space-y-3">
                         <label className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Text Content</label>
-                        {emailBlocks.find(b => b.id === selectedBlockId)?.type === 'body_text' ? (
+                        {selectedBlock.type === 'body_text' ? (
                           <textarea 
-                            value={emailBlocks.find(b => b.id === selectedBlockId)?.content.text}
+                            value={selectedBlock.content.text}
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              newBlocks[idx].content.text = e.target.value;
+                              (newBlocks[idx].content as any).text = e.target.value;
                               setEmailBlocks(newBlocks);
                             }}
                             className="w-full h-24 p-2 text-xs border rounded-lg resize-none focus:outline-none focus:ring-1"
@@ -1003,11 +1010,11 @@ export default function EmailBuilderDashboard() {
                           />
                         ) : (
                           <Input 
-                            value={emailBlocks.find(b => b.id === selectedBlockId)?.content.text}
+                            value={(selectedBlock.content as any).text}
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              newBlocks[idx].content.text = e.target.value;
+                              (newBlocks[idx].content as any).text = e.target.value;
                               setEmailBlocks(newBlocks);
                             }}
                             className="text-xs h-8"
@@ -1016,46 +1023,46 @@ export default function EmailBuilderDashboard() {
                       </div>
                     )}
 
-                    {emailBlocks.find(b => b.id === selectedBlockId)?.style.fontSize && (
+                    {('fontSize' in selectedBlock.style) && (
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
                           <label className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Font Size</label>
-                          <span className="text-[10px] font-mono">{emailBlocks.find(b => b.id === selectedBlockId)?.style.fontSize?.[0]}px</span>
+                          <span className="text-[10px] font-mono">{(selectedBlock.style as any).fontSize?.[0]}px</span>
                         </div>
                         <Slider 
                           min={12} max={64} step={1} 
-                          value={emailBlocks.find(b => b.id === selectedBlockId)?.style.fontSize}
+                          value={(selectedBlock.style as any).fontSize}
                           onValueChange={(val) => {
                             const newBlocks = [...emailBlocks];
                             const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                            newBlocks[idx].style.fontSize = val;
+                            (newBlocks[idx].style as any).fontSize = val;
                             setEmailBlocks(newBlocks);
                           }}
                         />
                       </div>
                     )}
 
-                    {emailBlocks.find(b => b.id === selectedBlockId)?.style.color && (
+                    {('color' in selectedBlock.style) && (
                       <div className="space-y-3">
                         <label className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Color</label>
                         <div className="flex gap-2">
                           <Input 
                             type="color" 
-                            value={emailBlocks.find(b => b.id === selectedBlockId)?.style.color}
+                            value={(selectedBlock.style as any).color}
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              newBlocks[idx].style.color = e.target.value;
+                              (newBlocks[idx].style as any).color = e.target.value;
                               setEmailBlocks(newBlocks);
                             }}
                             className="w-8 h-8 p-0 border-0 cursor-pointer"
                           />
                           <Input 
-                            value={emailBlocks.find(b => b.id === selectedBlockId)?.style.color}
+                            value={(selectedBlock.style as any).color}
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              newBlocks[idx].style.color = e.target.value;
+                              (newBlocks[idx].style as any).color = e.target.value;
                               setEmailBlocks(newBlocks);
                             }}
                             className="text-xs h-8 flex-1"
@@ -1064,15 +1071,15 @@ export default function EmailBuilderDashboard() {
                       </div>
                     )}
 
-                    {emailBlocks.find(b => b.id === selectedBlockId)?.content.imageUrl !== undefined && (
+                    {('imageUrl' in selectedBlock.content) && (
                       <div className="space-y-3">
                         <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: colors.grey }}>Image URL</label>
                         <Input 
-                          value={emailBlocks.find(b => b.id === selectedBlockId)?.content.imageUrl}
+                          value={selectedBlock.content.imageUrl}
                           onChange={(e) => {
                             const newBlocks = [...emailBlocks];
                             const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                            newBlocks[idx].content.imageUrl = e.target.value;
+                            (newBlocks[idx].content as any).imageUrl = e.target.value;
                             setEmailBlocks(newBlocks);
                           }}
                           className="text-xs h-8"
@@ -1086,7 +1093,15 @@ export default function EmailBuilderDashboard() {
           </Tabs>
         </div>
 
-        <div className={`p-8 border-t transition-all duration-300 ${isDarkMode ? 'bg-[#1a1a1e] border-zinc-800' : 'bg-white border-zinc-200'}`}>
+        <div className={`p-8 border-t transition-all duration-300 glass-liquid ${isDarkMode ? 'border-zinc-800' : 'border-zinc-200'}`}>
+          {compilerErrorCount > 0 && (
+            <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 flex items-center gap-2 text-amber-800 animate-in fade-in slide-in-from-bottom-2">
+              <span className="text-lg">⚠</span>
+              <p className="text-[10px] font-bold uppercase tracking-tight">
+                {compilerErrorCount} block{compilerErrorCount > 1 ? 's' : ''} could not be compiled and {compilerErrorCount > 1 ? 'were' : 'was'} skipped. Check console for details.
+              </p>
+            </div>
+          )}
           <Button 
             onClick={handleCopyToClipboard} 
             className={`w-full font-bold h-12 rounded-xl transition-all duration-300 shadow-lg active:scale-95 hover:shadow-xl flex items-center justify-center gap-2 ${isDarkMode ? 'bg-zinc-900 text-white hover:bg-zinc-800' : 'bg-black text-white hover:bg-zinc-900'}`}
@@ -1098,9 +1113,9 @@ export default function EmailBuilderDashboard() {
       </div>
 
       {/* PREVIEW */}
-      <div className={`flex-1 py-12 px-8 overflow-y-auto flex flex-col items-center justify-start transition-colors duration-500 ${isDarkMode ? 'bg-[#121214]' : 'bg-[#f4f4f5]'}`}>
+      <div className={`flex-1 py-12 px-8 overflow-y-auto flex flex-col items-center justify-start transition-colors duration-500 ${isDarkMode ? 'bg-[#121214]' : 'bg-gradient-to-br from-[#f4f4f5] via-[#f9f7f4] to-[#fafbf9]'}`}>
         {/* Viewport Toggle */}
-        <div className={`mb-8 flex items-center p-1 rounded-lg border animate-in fade-in slide-in-from-top duration-700 ${isDarkMode ? 'bg-zinc-800/50 border-zinc-700' : 'bg-stone-200/50 border-stone-200'}`}>
+        <div className={`mb-8 flex items-center p-1 rounded-lg border animate-in fade-in slide-in-from-top duration-700 glass-float ${isDarkMode ? 'border-zinc-700' : 'border-stone-200'}`}>
           <button 
             onClick={() => setViewportMode('desktop')}
             className={`p-1.5 rounded-md transition-all duration-200 ${viewportMode === 'desktop' ? 'bg-zinc-900 text-white shadow-sm' : 'text-zinc-400 hover:text-zinc-600'}`}
@@ -1136,90 +1151,104 @@ export default function EmailBuilderDashboard() {
           style={{ maxWidth: viewportMode === 'desktop' ? '600px' : '375px' }}
         >
           <div 
-            className={`w-full transition-all duration-500 overflow-hidden ${viewportMode === 'mobile' ? 'border-[12px] border-zinc-800 rounded-[48px] shadow-2xl' : 'rounded-[24px] shadow-xl border'}`}
+            className={`w-full transition-all duration-500 overflow-hidden glass-liquid-thick ${viewportMode === 'mobile' ? 'border-[12px] border-zinc-800 rounded-[48px]' : 'rounded-[24px] border'}`}
             style={{ 
               backgroundColor: colors.offwhite,
-              borderColor: viewportMode === 'mobile' ? '#27272a' : colors.greyLight,
-              boxShadow: viewportMode === 'mobile' ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)' : "0 20px 60px -16px rgba(0,0,0,0.12)"
+              borderColor: viewportMode === 'mobile' ? '#27272a' : undefined,
+              boxShadow: viewportMode === 'mobile' ? '0 25px 50px -12px rgba(0, 0, 0, 0.5)' : undefined
             }}
           >
             <div style={{
               backgroundColor: backgroundColor,
               padding: `${paddingVertical[0]}px ${paddingHorizontal[0]}px`,
               borderRadius: viewportMode === 'mobile' ? '0px' : `${borderRadius[0]}px`,
-              transition: "all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)"
+              transition: "all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1)",
+              minHeight: emailBlocks.length === 0 ? '400px' : 'auto',
+              display: emailBlocks.length === 0 ? 'flex' : 'block',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}>
-              {emailBlocks.map((block, index) => {
-                const isHero = block.type === 'hero_image';
-                if (!isHero) return null;
-                
-                return (
-                  <div key={block.id} className="group relative">
-                    {/* Action Bar */}
-                    <div className="absolute -right-12 top-0 opacity-0 group-hover:opacity-100 flex flex-col gap-1.5 transition-all duration-300 z-20">
-                      <button 
-                        onClick={() => moveBlock(block.id, 'up')}
-                        disabled={index === 0}
-                        className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                      >
-                        <ArrowUp size={14} style={{ color: colors.grey }} />
-                      </button>
-                      <button 
-                        onClick={() => moveBlock(block.id, 'down')}
-                        disabled={index === emailBlocks.length - 1}
-                        className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                      >
-                        <ArrowDown size={14} style={{ color: colors.grey }} />
-                      </button>
-                      <button 
-                        onClick={() => removeBlock(block.id)}
-                        disabled={emailBlocks.length === 1}
-                        className="p-1.5 bg-white rounded-md shadow-md hover:bg-red-50 text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                    {renderBlock(block)}
+              {emailBlocks.length === 0 ? (
+                <div className="text-center space-y-4 animate-in fade-in zoom-in-95 duration-700">
+                  <div className="w-16 h-16 bg-zinc-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <LayersIcon size={32} className="text-zinc-400" />
                   </div>
-                );
-              })}
-              
-              <div className="space-y-4">
-                {emailBlocks.map((block, index) => {
-                  const isHero = block.type === 'hero_image';
-                  if (isHero) return null;
-                  
-                  return (
-                    <div key={block.id} className="group relative">
-                      {/* Action Bar */}
-                      <div className="absolute -right-12 top-0 opacity-0 group-hover:opacity-100 flex flex-col gap-1.5 transition-all duration-300 z-20">
-                        <button 
-                          onClick={() => moveBlock(block.id, 'up')}
-                          disabled={index === 0}
-                          className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                        >
-                          <ArrowUp size={14} style={{ color: colors.grey }} />
-                        </button>
-                        <button 
-                          onClick={() => moveBlock(block.id, 'down')}
-                          disabled={index === emailBlocks.length - 1}
-                          className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                        >
-                          <ArrowDown size={14} style={{ color: colors.grey }} />
-                        </button>
-                        <button 
-                          onClick={() => removeBlock(block.id)}
-                          disabled={emailBlocks.length === 1}
-                          className="p-1.5 bg-white rounded-md shadow-md hover:bg-red-50 text-red-500 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
-                        >
-                          <X size={14} />
-                        </button>
+                  <h3 className="text-xl font-bold text-zinc-800">Your canvas is empty</h3>
+                  <p className="text-sm text-zinc-500 max-w-[200px] mx-auto">Add a block from the sidebar to get started</p>
+                </div>
+              ) : (
+                <>
+                  {emailBlocks.map((block, index) => {
+                    const isHero = block.type === 'hero_image';
+                    if (!isHero) return null;
+                    
+                    return (
+                      <div key={block.id} className="group relative">
+                        {/* Action Bar */}
+                        <div className="absolute -right-12 top-0 opacity-0 group-hover:opacity-100 flex flex-col gap-1.5 transition-all duration-300 z-20">
+                          <button 
+                            onClick={() => moveBlockUp(block.id)}
+                            disabled={index === 0}
+                            className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            <ArrowUp size={14} style={{ color: colors.grey }} />
+                          </button>
+                          <button 
+                            onClick={() => moveBlockDown(block.id)}
+                            disabled={index === emailBlocks.length - 1}
+                            className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                          >
+                            <ArrowDown size={14} style={{ color: colors.grey }} />
+                          </button>
+                          <button 
+                            onClick={() => deleteBlock(block.id)}
+                            className="p-1.5 bg-white rounded-md shadow-md hover:bg-red-50 text-red-500 transition-all"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                        {renderBlock(block)}
                       </div>
-                      {renderBlock(block)}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                  
+                  <div className="space-y-4">
+                    {emailBlocks.map((block, index) => {
+                      const isHero = block.type === 'hero_image';
+                      if (isHero) return null;
+                      
+                      return (
+                        <div key={block.id} className="group relative">
+                          {/* Action Bar */}
+                          <div className="absolute -right-12 top-0 opacity-0 group-hover:opacity-100 flex flex-col gap-1.5 transition-all duration-300 z-20">
+                            <button 
+                              onClick={() => moveBlockUp(block.id)}
+                              disabled={index === 0}
+                              className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            >
+                              <ArrowUp size={14} style={{ color: colors.grey }} />
+                            </button>
+                            <button 
+                              onClick={() => moveBlockDown(block.id)}
+                              disabled={index === emailBlocks.length - 1}
+                              className="p-1.5 bg-white rounded-md shadow-md hover:bg-stone-50 disabled:opacity-30 disabled:cursor-not-allowed transition-all"
+                            >
+                              <ArrowDown size={14} style={{ color: colors.grey }} />
+                            </button>
+                            <button 
+                              onClick={() => deleteBlock(block.id)}
+                              className="p-1.5 bg-white rounded-md shadow-md hover:bg-red-50 text-red-500 transition-all"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                          {renderBlock(block)}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </div>
         </div>
