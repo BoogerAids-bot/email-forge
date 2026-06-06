@@ -1,5 +1,14 @@
 import { createServerClient } from '@supabase/ssr'
+import { Ratelimit } from '@upstash/ratelimit'
+import { Redis } from '@upstash/redis'
 import { NextResponse, type NextRequest } from 'next/server'
+
+const ratelimit = new Ratelimit({
+  redis: Redis.fromEnv(),
+  limiter: Ratelimit.slidingWindow(20, '10 s'),
+  analytics: true,
+  prefix: 'email-forge',
+})
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -41,6 +50,26 @@ export async function middleware(request: NextRequest) {
     const url = request.nextUrl.clone()
     url.pathname = '/'
     return NextResponse.redirect(url)
+  }
+
+  // Rate limit authenticated users by their user ID
+  // Use IP as fallback identifier for unauthenticated edge cases
+  const identifier = user?.id ??
+    request.headers.get('x-forwarded-for') ??
+    'anonymous'
+
+  const { success, limit, remaining, reset } = await ratelimit.limit(identifier)
+
+  if (!success) {
+    return new NextResponse('Too many requests', {
+      status: 429,
+      headers: {
+        'X-RateLimit-Limit': limit.toString(),
+        'X-RateLimit-Remaining': remaining.toString(),
+        'X-RateLimit-Reset': reset.toString(),
+        'Retry-After': Math.ceil((reset - Date.now()) / 1000).toString(),
+      },
+    })
   }
 
   return supabaseResponse
