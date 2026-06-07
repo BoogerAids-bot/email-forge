@@ -161,9 +161,11 @@ export default function EmailBuilderDashboard() {
   const [emailBlocks, setEmailBlocks] = useState<EmailBlock[]>(defaultBlocks);
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(null);
   const [isDirty, setIsDirty] = useState(false);
-  const isIgnoreDirty = React.useRef(true);
+  const isSystemLoading = React.useRef(true);
+  const userInteracted = React.useRef(false);
   const [viewportMode, setViewportMode] = useState<'desktop' | 'mobile'>('desktop');
-  
+  const [toast, setToast] = useState<{ message: string; type: "warning" | "success" | "info" } | null>(null);
+
   // Persistence State
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
@@ -172,14 +174,28 @@ export default function EmailBuilderDashboard() {
     timestamp: string;
   } | null>(null);
 
+  // Toast Auto-Clear
+  useEffect(() => {
+    if (toast) {
+      const timer = setTimeout(() => setToast(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [toast]);
+
+  // End initial hydration phase
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      isSystemLoading.current = false;
+    }, 100);
+    return () => clearTimeout(timer);
+  }, []);
+
   // Auto-save to localStorage
   useEffect(() => {
-    if (isIgnoreDirty.current || !isDirty) return;
+    if (isSystemLoading.current || !isDirty) return;
 
-    // Guard: only auto-save when emailBlocks.length > 0 OR when the user has explicitly performed an action
-    // isDirty already implies an action was performed, but we'll add the length check for clarity/safety
-    // especially on initial load if isDirty was somehow true.
-    if (emailBlocks.length === 0 && !isDirty) return;
+    // Guard: only save when emailBlocks.length > 0 OR the user has explicitly performed an action.
+    if (emailBlocks.length === 0 && !userInteracted.current) return;
 
     const timer = setTimeout(() => {
       const currentConfig = {
@@ -253,11 +269,11 @@ export default function EmailBuilderDashboard() {
 
   // Mark dirty on any config change
   useEffect(() => {
-    if (isIgnoreDirty.current) {
-      isIgnoreDirty.current = false;
+    if (isSystemLoading.current) {
       return;
     }
     setIsDirty(true);
+    userInteracted.current = true;
   }, [
     emailBlocks, backgroundColor, paddingVertical, paddingHorizontal, borderRadius,
     hasImage, imageUrl, imageHeight, imageMarginBottom,
@@ -294,31 +310,33 @@ export default function EmailBuilderDashboard() {
   const moveBlockUp = (id: string) => {
     const index = emailBlocks.findIndex((b) => b.id === id);
     if (index <= 0) return;
-    const newBlocks = [...emailBlocks];
-    [newBlocks[index - 1], newBlocks[index]] = [newBlocks[index], newBlocks[index - 1]];
+    const newBlocks = [
+      ...emailBlocks.slice(0, index - 1),
+      emailBlocks[index],
+      emailBlocks[index - 1],
+      ...emailBlocks.slice(index + 1)
+    ];
     setEmailBlocks(newBlocks);
   };
 
   const moveBlockDown = (id: string) => {
     const index = emailBlocks.findIndex((b) => b.id === id);
     if (index === -1 || index >= emailBlocks.length - 1) return;
-    const newBlocks = [...emailBlocks];
-    [newBlocks[index + 1], newBlocks[index]] = [newBlocks[index], newBlocks[index + 1]];
+    const newBlocks = [
+      ...emailBlocks.slice(0, index),
+      emailBlocks[index + 1],
+      emailBlocks[index],
+      ...emailBlocks.slice(index + 2)
+    ];
     setEmailBlocks(newBlocks);
   };
 
   const deleteBlock = (id: string) => {
-    const index = emailBlocks.findIndex(b => b.id === id);
     const newBlocks = emailBlocks.filter((b) => b.id !== id);
     setEmailBlocks(newBlocks);
     
     if (selectedBlockId === id) {
-      if (newBlocks.length > 0) {
-        const nextIndex = index > 0 ? index - 1 : 0;
-        setSelectedBlockId(newBlocks[nextIndex].id);
-      } else {
-        setSelectedBlockId(null);
-      }
+      setSelectedBlockId(null);
     }
   };
 
@@ -392,7 +410,7 @@ export default function EmailBuilderDashboard() {
     if (!cfg) return;
 
     // Prevent isDirty from triggering during load
-    isIgnoreDirty.current = true;
+    isSystemLoading.current = true;
     setIsDirty(false);
 
     setBackgroundColor((cfg.backgroundColor as string) || "#ffffff");
@@ -425,23 +443,28 @@ export default function EmailBuilderDashboard() {
         setEmailBlocks(result.data);
       } else {
         // Attempt to recover valid blocks individually
-        const rawBlocks = cfg.emailBlocks as any[];
-        const validBlocks: EmailBlock[] = [];
-        let failedCount = 0;
+        const rawBlocks = cfg.emailBlocks;
+        if (Array.isArray(rawBlocks)) {
+          const validBlocks: EmailBlock[] = [];
+          let failedCount = 0;
 
-        rawBlocks.forEach((block) => {
-          const blockResult = EmailBlockSchema.safeParse(block);
-          if (blockResult.success) {
-            validBlocks.push(blockResult.data);
-          } else {
-            failedCount++;
-            console.warn(`Block ${block.id} failed validation:`, blockResult.error);
+          rawBlocks.forEach((block) => {
+            const blockResult = EmailBlockSchema.safeParse(block);
+            if (blockResult.success) {
+              validBlocks.push(blockResult.data);
+            } else {
+              failedCount++;
+              console.warn(`Block failed validation:`, blockResult.error);
+            }
+          });
+
+          setEmailBlocks(validBlocks);
+          if (failedCount > 0) {
+            setToast({
+              message: `${failedCount} block(s) could not be restored — they may be from an older version.`,
+              type: "warning"
+            });
           }
-        });
-
-        setEmailBlocks(validBlocks);
-        if (failedCount > 0) {
-          alert(`${failedCount} block(s) could not be restored — they may be from an older version.`);
         }
       }
     }
@@ -452,6 +475,11 @@ export default function EmailBuilderDashboard() {
       timestamp: new Date().toISOString()
     }));
     setLastSaved(new Date());
+
+    setTimeout(() => {
+      isSystemLoading.current = false;
+      setIsDirty(false);
+    }, 100);
   };
 
   const handleDeleteTemplate = async (e: React.MouseEvent, templateId: string) => {
@@ -554,7 +582,14 @@ export default function EmailBuilderDashboard() {
   }, [emailBlocks]);
 
   const generateHTMLCode = () => {
-    const compiledBlocks = emailBlocks.map(block => compileBlock(block)).join("");
+    const compiledBlocks = emailBlocks.map(block => {
+      try {
+        return compileBlock(block);
+      } catch (error) {
+        console.error(`Block compilation failed for ${block.id}:`, error);
+        return `<!-- block ${block.id} failed to render: ${error instanceof Error ? error.message : String(error)} -->`;
+      }
+    }).join("");
 
     return `<!DOCTYPE html>
 <html xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">
@@ -725,6 +760,7 @@ export default function EmailBuilderDashboard() {
   };
 
   const selectedBlock = selectedBlockId ? emailBlocks.find(b => b.id === selectedBlockId) : null;
+  const selectedBlockIndex = selectedBlock ? emailBlocks.findIndex(b => b.id === selectedBlock.id) : -1;
 
   return (
     <div className={`flex h-screen w-screen overflow-hidden font-['Inter',_'Poppins',_system-ui,_-apple-system] transition-colors duration-500 ${isDarkMode ? 'bg-[#121214] text-zinc-100' : 'bg-[#f4f4f5] text-[#000000]'}`}
@@ -989,7 +1025,37 @@ export default function EmailBuilderDashboard() {
                 {selectedBlock && (
                   <div className="space-y-6 pt-6 border-t animate-in slide-in-from-bottom duration-500" style={{ borderColor: colors.greyLight }}>
                     <div className="flex items-center justify-between">
-                      <h3 className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-orange-400' : 'text-orange-600'}`}>Editing: {selectedBlock.type.replace('_', ' ')}</h3>
+                      <div className="flex items-center gap-2">
+                        <h3 className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-orange-400' : 'text-orange-600'}`}>Editing: {selectedBlock.type.replace('_', ' ')}</h3>
+                        <div className="flex items-center gap-1 ml-2">
+                          <button
+                            onClick={() => moveBlockUp(selectedBlock.id)}
+                            disabled={selectedBlockIndex <= 0}
+                            className="p-1 rounded-md text-stone-400 hover:text-blue-500 disabled:opacity-30 disabled:hover:text-stone-400 transition-colors cursor-pointer"
+                            title="Move Block Up"
+                            aria-label="Move Block Up"
+                          >
+                            <ArrowUp size={12} />
+                          </button>
+                          <button
+                            onClick={() => moveBlockDown(selectedBlock.id)}
+                            disabled={selectedBlockIndex === -1 || selectedBlockIndex >= emailBlocks.length - 1}
+                            className="p-1 rounded-md text-stone-400 hover:text-blue-500 disabled:opacity-30 disabled:hover:text-stone-400 transition-colors cursor-pointer"
+                            title="Move Block Down"
+                            aria-label="Move Block Down"
+                          >
+                            <ArrowDown size={12} />
+                          </button>
+                          <button
+                            onClick={() => deleteBlock(selectedBlock.id)}
+                            className="p-1 rounded-md text-stone-400 hover:text-red-500 transition-colors cursor-pointer"
+                            title="Delete Block"
+                            aria-label="Delete Block"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
                       <Button variant="ghost" size="sm" onClick={() => setSelectedBlockId(null)} className="h-6 text-[10px]">Close</Button>
                     </div>
 
@@ -1002,20 +1068,34 @@ export default function EmailBuilderDashboard() {
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              (newBlocks[idx].content as any).text = e.target.value;
-                              setEmailBlocks(newBlocks);
+                              if (idx !== -1) {
+                                const targetBlock = newBlocks[idx];
+                                if (targetBlock.type === 'body_text') {
+                                  targetBlock.content.text = e.target.value;
+                                }
+                                setEmailBlocks(newBlocks);
+                              }
                             }}
                             className="w-full h-24 p-2 text-xs border rounded-lg resize-none focus:outline-none focus:ring-1"
                             style={{ backgroundColor: colors.offwhite, borderColor: colors.greyLight }}
                           />
                         ) : (
                           <Input 
-                            value={(selectedBlock.content as any).text}
+                            value={
+                              selectedBlock.type === 'heading' || selectedBlock.type === 'cta_button' 
+                                ? selectedBlock.content.text 
+                                : ""
+                            }
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              (newBlocks[idx].content as any).text = e.target.value;
-                              setEmailBlocks(newBlocks);
+                              if (idx !== -1) {
+                                const targetBlock = newBlocks[idx];
+                                if (targetBlock.type === 'heading' || targetBlock.type === 'cta_button') {
+                                  targetBlock.content.text = e.target.value;
+                                }
+                                setEmailBlocks(newBlocks);
+                              }
                             }}
                             className="text-xs h-8"
                           />
@@ -1027,16 +1107,29 @@ export default function EmailBuilderDashboard() {
                       <div className="space-y-4">
                         <div className="flex items-center justify-between">
                           <label className={`text-[10px] font-bold uppercase tracking-widest ${isDarkMode ? 'text-zinc-400' : 'text-gray-500'}`}>Font Size</label>
-                          <span className="text-[10px] font-mono">{(selectedBlock.style as any).fontSize?.[0]}px</span>
+                          <span className="text-[10px] font-mono">
+                            {selectedBlock.type === 'heading' || selectedBlock.type === 'body_text'
+                              ? selectedBlock.style.fontSize?.[0]
+                              : 16}px
+                          </span>
                         </div>
                         <Slider 
                           min={12} max={64} step={1} 
-                          value={(selectedBlock.style as any).fontSize}
+                          value={
+                            selectedBlock.type === 'heading' || selectedBlock.type === 'body_text'
+                              ? selectedBlock.style.fontSize
+                              : [16]
+                          }
                           onValueChange={(val) => {
                             const newBlocks = [...emailBlocks];
                             const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                            (newBlocks[idx].style as any).fontSize = val;
-                            setEmailBlocks(newBlocks);
+                            if (idx !== -1) {
+                              const targetBlock = newBlocks[idx];
+                              if (targetBlock.type === 'heading' || targetBlock.type === 'body_text') {
+                                targetBlock.style.fontSize = val;
+                              }
+                              setEmailBlocks(newBlocks);
+                            }
                           }}
                         />
                       </div>
@@ -1048,22 +1141,40 @@ export default function EmailBuilderDashboard() {
                         <div className="flex gap-2">
                           <Input 
                             type="color" 
-                            value={(selectedBlock.style as any).color}
+                            value={
+                              selectedBlock.type === 'heading' || selectedBlock.type === 'body_text'
+                                ? selectedBlock.style.color
+                                : "#000000"
+                            }
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              (newBlocks[idx].style as any).color = e.target.value;
-                              setEmailBlocks(newBlocks);
+                              if (idx !== -1) {
+                                const targetBlock = newBlocks[idx];
+                                if (targetBlock.type === 'heading' || targetBlock.type === 'body_text') {
+                                  targetBlock.style.color = e.target.value;
+                                }
+                                setEmailBlocks(newBlocks);
+                              }
                             }}
                             className="w-8 h-8 p-0 border-0 cursor-pointer"
                           />
                           <Input 
-                            value={(selectedBlock.style as any).color}
+                            value={
+                              selectedBlock.type === 'heading' || selectedBlock.type === 'body_text'
+                                ? selectedBlock.style.color
+                                : "#000000"
+                            }
                             onChange={(e) => {
                               const newBlocks = [...emailBlocks];
                               const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                              (newBlocks[idx].style as any).color = e.target.value;
-                              setEmailBlocks(newBlocks);
+                              if (idx !== -1) {
+                                const targetBlock = newBlocks[idx];
+                                if (targetBlock.type === 'heading' || targetBlock.type === 'body_text') {
+                                  targetBlock.style.color = e.target.value;
+                                }
+                                setEmailBlocks(newBlocks);
+                              }
                             }}
                             className="text-xs h-8 flex-1"
                           />
@@ -1075,12 +1186,21 @@ export default function EmailBuilderDashboard() {
                       <div className="space-y-3">
                         <label className="text-[10px] font-bold uppercase tracking-widest" style={{ color: colors.grey }}>Image URL</label>
                         <Input 
-                          value={selectedBlock.content.imageUrl}
+                          value={
+                            selectedBlock.type === 'hero_image'
+                              ? selectedBlock.content.imageUrl
+                              : ""
+                          }
                           onChange={(e) => {
                             const newBlocks = [...emailBlocks];
                             const idx = newBlocks.findIndex(b => b.id === selectedBlockId);
-                            (newBlocks[idx].content as any).imageUrl = e.target.value;
-                            setEmailBlocks(newBlocks);
+                            if (idx !== -1) {
+                              const targetBlock = newBlocks[idx];
+                              if (targetBlock.type === 'hero_image') {
+                                targetBlock.content.imageUrl = e.target.value;
+                              }
+                              setEmailBlocks(newBlocks);
+                            }
                           }}
                           className="text-xs h-8"
                         />
@@ -1272,6 +1392,20 @@ export default function EmailBuilderDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-50 animate-in fade-in slide-in-from-bottom-5 duration-300">
+          <div className={`p-4 rounded-xl border shadow-lg flex items-center gap-3 ${
+            toast.type === "warning" ? "bg-amber-500 text-white border-amber-600" :
+            toast.type === "success" ? "bg-emerald-500 text-white border-emerald-600" :
+            "bg-zinc-800 text-white border-zinc-700"
+          }`}>
+            <span className="text-sm">{toast.type === "warning" ? "⚠️" : toast.type === "success" ? "✅" : "ℹ️"}</span>
+            <p className="text-xs font-semibold">{toast.message}</p>
+            <button onClick={() => setToast(null)} className="ml-2 hover:opacity-85 text-xs font-bold cursor-pointer">✕</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
