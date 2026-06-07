@@ -3,12 +3,20 @@ import { Ratelimit } from '@upstash/ratelimit'
 import { Redis } from '@upstash/redis'
 import { NextResponse, type NextRequest } from 'next/server'
 
-const ratelimit = new Ratelimit({
-  redis: Redis.fromEnv(),
-  limiter: Ratelimit.slidingWindow(20, '10 s'),
-  analytics: true,
-  prefix: 'email-forge',
-})
+let ratelimit: Ratelimit | null = null
+
+if (process.env.UPSTASH_REDIS_REST_URL && process.env.UPSTASH_REDIS_REST_TOKEN) {
+  try {
+    ratelimit = new Ratelimit({
+      redis: Redis.fromEnv(),
+      limiter: Ratelimit.slidingWindow(20, '10 s'),
+      analytics: true,
+      prefix: 'email-forge',
+    })
+  } catch (err) {
+    console.error('Failed to initialize Upstash Redis Ratelimit:', err)
+  }
+}
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request })
@@ -54,22 +62,28 @@ export async function middleware(request: NextRequest) {
 
   // Rate limit authenticated users by their user ID
   // Use IP as fallback identifier for unauthenticated edge cases
-  const identifier = user?.id ??
-    request.headers.get('x-forwarded-for') ??
-    'anonymous'
+  if (ratelimit) {
+    const identifier = user?.id ??
+      request.headers.get('x-forwarded-for') ??
+      'anonymous'
 
-  const { success, limit, remaining, reset } = await ratelimit.limit(identifier)
+    try {
+      const { success, limit, remaining, reset } = await ratelimit.limit(identifier)
 
-  if (!success) {
-    return new NextResponse('Too many requests', {
-      status: 429,
-      headers: {
-        'X-RateLimit-Limit': limit.toString(),
-        'X-RateLimit-Remaining': remaining.toString(),
-        'X-RateLimit-Reset': reset.toString(),
-        'Retry-After': Math.ceil((reset - Date.now()) / 1000).toString(),
-      },
-    })
+      if (!success) {
+        return new NextResponse('Too many requests', {
+          status: 429,
+          headers: {
+            'X-RateLimit-Limit': limit.toString(),
+            'X-RateLimit-Remaining': remaining.toString(),
+            'X-RateLimit-Reset': reset.toString(),
+            'Retry-After': Math.ceil((reset - Date.now()) / 1000).toString(),
+          },
+        })
+      }
+    } catch (err) {
+      console.error('Rate limit evaluation failed:', err)
+    }
   }
 
   return supabaseResponse
